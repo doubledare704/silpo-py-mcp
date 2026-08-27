@@ -1,6 +1,6 @@
 import asyncio
 
-from silpo_mcp import SilpoClient
+from silpo_py_mcp import SilpoClient
 
 
 async def main() -> None:

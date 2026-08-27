@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from silpo_mcp.models.base import SilpoModel
+from silpo_py_mcp.models.base import SilpoModel
 
 
 class GeoPoint(SilpoModel):

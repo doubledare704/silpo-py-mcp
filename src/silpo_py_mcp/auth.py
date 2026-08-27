@@ -76,7 +76,7 @@ def build_oauth(
     mcp_url: str,
     *,
     scopes: str | list[str] | None = None,
-    client_name: str = "silpo-mcp",
+    client_name: str = "silpo-py-mcp",
     token_endpoint_auth_method: str = "none",
     token_storage: FernetEncryptionWrapper | None = None,
     callback_port: int | None = None,

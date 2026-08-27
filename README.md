@@ -1,4 +1,4 @@
-# silpo-mcp
+# silpo-py-mcp
 
 Typed Python client for the official **Silpo** MCP server
 ([`https://mcp.silpo.ua/mcp`](https://ai-factory.silpo.ua/docs/mcp)).
@@ -19,7 +19,7 @@ Requires **Python 3.12+**.
 ## Install
 
 ```bash
-uv add silpo-mcp            # in your project
+uv add silpo-py-mcp            # in your project
 # or, for local development of this package:
 uv sync
 ```
@@ -28,7 +28,7 @@ uv sync
 
 ```python
 import asyncio
-from silpo_mcp import SilpoClient
+from silpo_py_mcp import SilpoClient
 
 
 async def main() -> None:
@@ -65,7 +65,7 @@ client refreshes them automatically.
 
 ```python
 import asyncio
-from silpo_mcp import SilpoClient
+from silpo_py_mcp import SilpoClient
 
 
 async def main() -> None:
@@ -100,7 +100,7 @@ uv run examples/real_smoke.py
 ```
 
 On the first run a browser opens for login at `auth.silpo.ua`; afterwards the
-encrypted token in `~/.silpo_mcp` is reused. The script checks:
+encrypted token in `~/.silpo_py_mcp` is reused. The script checks:
 
 - live `tools/list` matches the 39 documented tools and prints every live
   signature (arg names/types),
@@ -132,9 +132,9 @@ file. Key settings:
 | Variable | Default | Description |
 |---|---|---|
 | `SILPO_MCP_URL` | `https://mcp.silpo.ua/mcp` | Server endpoint |
-| `SILPO_OAUTH_STORAGE_DIR` | `~/.silpo_mcp` | Encrypted token store location |
+| `SILPO_OAUTH_STORAGE_DIR` | `~/.silpo_py_mcp` | Encrypted token store location |
 | `SILPO_OAUTH_ENCRYPTION_KEY` | auto-generated | Fernet key (base64) |
-| `SILPO_OAUTH_CLIENT_NAME` | `silpo-mcp` | Client name for OAuth registration |
+| `SILPO_OAUTH_CLIENT_NAME` | `silpo-py-mcp` | Client name for OAuth registration |
 | `SILPO_OAUTH_TOKEN_ENDPOINT_AUTH_METHOD` | `none` | DCR auth method: `none` (public client + PKCE, default), `client_secret_post`, `client_secret_basic` |
 | `SILPO_OAUTH_CALLBACK_TIMEOUT` | `300.0` | Seconds to wait for the browser callback |
 | `SILPO_DEFAULT_REQUEST_TIMEOUT` | `30.0` | Per-request timeout |
@@ -159,7 +159,7 @@ updating; `call_tool` keeps working.
 
 ## Error handling
 
-`silpo_mcp.exceptions` maps Silpo's documented error responses:
+`silpo_py_mcp.exceptions` maps Silpo's documented error responses:
 
 | Server response | Raised |
 |---|---|
@@ -185,7 +185,7 @@ uv run pre-commit install  # install git hooks (format/lint/type/tests)
 ### Project layout
 
 ```
-src/silpo_mcp/
+src/silpo_py_mcp/
 ├── client.py          # SilpoClient — typed methods + error mapping
 ├── mock_server.py     # SilpoMockServer — in-memory FastMCP server (39 tools)
 ├── auth.py            # OAuth 2.1 + PKCE helper, encrypted token storage

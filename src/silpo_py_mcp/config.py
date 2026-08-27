@@ -27,14 +27,14 @@ class SilpoSettings(BaseSettings):
     """Streamable HTTP endpoint of the official Silpo MCP server."""
 
     oauth_scopes: str | None = Field(default=None, description="OAuth scopes to request.")
-    oauth_client_name: str = "silpo-mcp"
+    oauth_client_name: str = "silpo-py-mcp"
     oauth_token_endpoint_auth_method: str = "none"
     """Token endpoint auth method for DCR. Silpo supports
     ``none`` (public client + PKCE), ``client_secret_post``, ``client_secret_basic``."""
     oauth_callback_port: int | None = Field(default=None, description="Fixed OAuth callback port (default: random).")
     oauth_callback_timeout: float = 300.0
 
-    oauth_storage_dir: Path = Path("~/.silpo_mcp").expanduser()
+    oauth_storage_dir: Path = Path("~/.silpo_py_mcp").expanduser()
     """Directory for the encrypted OAuth token store."""
 
     oauth_encryption_key: str | None = Field(

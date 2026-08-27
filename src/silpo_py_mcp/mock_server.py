@@ -4,7 +4,7 @@ Used for development and testing without a live Silpo account. The mock
 mirrors the 39 documented tools with realistic fixtures and per-client
 cart state. Connect to it in-memory:
 
-    from silpo_mcp.mock_server import SilpoMockServer
+    from silpo_py_mcp.mock_server import SilpoMockServer
     from fastmcp import Client
 
     server = SilpoMockServer()

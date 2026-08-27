@@ -24,4 +24,4 @@ htmlcov/
 .DS_Store
 
 # Runtime
-.silpo_mcp/
+.silpo_py_mcp/

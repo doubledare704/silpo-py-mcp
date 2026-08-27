@@ -25,10 +25,10 @@ from fastmcp.exceptions import ToolError
 from mcp.types import Tool
 
 if TYPE_CHECKING:
-    from silpo_mcp.mock_server import SilpoMockServer
+    from silpo_py_mcp.mock_server import SilpoMockServer
 
-from silpo_mcp.config import SilpoSettings
-from silpo_mcp.exceptions import (
+from silpo_py_mcp.config import SilpoSettings
+from silpo_py_mcp.exceptions import (
     SilpoAuthError,
     SilpoConnectionError,
     SilpoForbiddenError,
@@ -37,7 +37,7 @@ from silpo_mcp.exceptions import (
     SilpoToolNotFoundError,
     SilpoValidationError,
 )
-from silpo_mcp.models import (
+from silpo_py_mcp.models import (
     Address,
     AvailableDeliveryType,
     BatchProductResult,
@@ -146,7 +146,7 @@ class SilpoClient:
         from fastmcp import Client as FastMCPClient
         from fastmcp.client.transports import StreamableHttpTransport
 
-        from silpo_mcp.auth import build_encrypted_token_storage, build_oauth
+        from silpo_py_mcp.auth import build_encrypted_token_storage, build_oauth
 
         settings = settings or SilpoSettings()
         storage = build_encrypted_token_storage(
@@ -171,7 +171,7 @@ class SilpoClient:
 
         Convenience for development and tests — no network or auth needed.
         """
-        from silpo_mcp.mock_server import SilpoMockServer as MockServer
+        from silpo_py_mcp.mock_server import SilpoMockServer as MockServer
 
         server = server or MockServer()
         return cls(FastMCPClient(server.fastmcp))

@@ -9,8 +9,8 @@ from fastmcp.client.client import CallToolResult
 from fastmcp.exceptions import ToolError
 from mcp.types import ContentBlock, TextContent
 
-from silpo_mcp.client import SilpoClient, _extract_payload
-from silpo_mcp.exceptions import (
+from silpo_py_mcp.client import SilpoClient, _extract_payload
+from silpo_py_mcp.exceptions import (
     SilpoAuthError,
     SilpoForbiddenError,
     SilpoRateLimitError,
@@ -129,7 +129,7 @@ def test_extract_payload_returns_text_when_not_json() -> None:
 
 
 async def test_extract_payload_raises_when_empty() -> None:
-    from silpo_mcp.exceptions import SilpoValidationError
+    from silpo_py_mcp.exceptions import SilpoValidationError
 
     with pytest.raises(SilpoValidationError):
         _extract_payload(_result())

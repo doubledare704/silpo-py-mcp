@@ -1,4 +1,4 @@
-"""silpo-mcp — typed Python client for the official Silpo MCP server.
+"""silpo-py-mcp — typed Python client for the official Silpo MCP server.
 
 Supports both the real ``https://mcp.silpo.ua/mcp`` endpoint (Streamable HTTP +
 OAuth 2.1/PKCE) and an in-memory mock server for development and tests.
@@ -6,7 +6,7 @@ OAuth 2.1/PKCE) and an in-memory mock server for development and tests.
 Quick start (against the mock):
 
     from fastmcp import Client
-    from silpo_mcp import SilpoClient, SilpoMockServer
+    from silpo_py_mcp import SilpoClient, SilpoMockServer
 
     server = SilpoMockServer()
     async with SilpoClient.from_fastmcp(Client(server.fastmcp)) as client:
@@ -16,9 +16,9 @@ Quick start (against the real server):
 
     from fastmcp import Client
     from fastmcp.client.auth import OAuth
-    from silpo_mcp import SilpoClient
-    from silpo_mcp.auth import build_encrypted_token_storage
-    from silpo_mcp.config import SilpoSettings
+    from silpo_py_mcp import SilpoClient
+    from silpo_py_mcp.auth import build_encrypted_token_storage
+    from silpo_py_mcp.config import SilpoSettings
 
     settings = SilpoSettings()
     storage = build_encrypted_token_storage(settings.oauth_storage_dir)
@@ -31,15 +31,15 @@ from __future__ import annotations
 
 from fastmcp import Client as FastMCPClient
 
-from silpo_mcp import auth, config, exceptions, models
-from silpo_mcp.auth import (
+from silpo_py_mcp import auth, config, exceptions, models
+from silpo_py_mcp.auth import (
     SilpoOAuthError,
     build_encrypted_token_storage,
     build_oauth,
 )
-from silpo_mcp.client import SilpoClient
-from silpo_mcp.config import SILPO_MCP_URL, SilpoSettings, build_settings
-from silpo_mcp.exceptions import (
+from silpo_py_mcp.client import SilpoClient
+from silpo_py_mcp.config import SILPO_MCP_URL, SilpoSettings, build_settings
+from silpo_py_mcp.exceptions import (
     SilpoAuthError,
     SilpoConnectionError,
     SilpoError,
@@ -49,8 +49,8 @@ from silpo_mcp.exceptions import (
     SilpoToolNotFoundError,
     SilpoValidationError,
 )
-from silpo_mcp.mock_server import SilpoMockServer
-from silpo_mcp.models import *  # noqa: F403
+from silpo_py_mcp.mock_server import SilpoMockServer
+from silpo_py_mcp.models import *  # noqa: F403
 
 __version__ = "0.1.0"
 

@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository.
 
 ## Project
 
-`silpo-mcp` — a typed Python client for the official Silpo MCP server
+`silpo-py-mcp` — a typed Python client for the official Silpo MCP server
 (`https://mcp.silpo.ua/mcp`). Built on FastMCP `3.4.7` for the Silpo AI
 Factory hackathon. Python 3.12+.
 
@@ -28,7 +28,7 @@ uv run pyrefly check           # type-check (strict)
 uv run pre-commit run --all-files  # full validation loop
 uv run examples/quickstart.py  # run the demo (mock)
 uv run examples/real_smoke.py  # run against the real server (first run: browser login)
-uv run python -m silpo_mcp ... # run any module
+uv run python -m silpo_py_mcp ... # run any module
 ```
 
 Validation gate (also installed as pre-commit hooks):
@@ -65,7 +65,7 @@ takes `pageSize`, `categoryId`, `onSale`). The mock mirrors these exactly.
 ## Architecture
 
 ```
-src/silpo_mcp/
+src/silpo_py_mcp/
 ├── client.py        # SilpoClient: typed methods + call_tool passthrough + error mapping
 ├── mock_server.py   # SilpoMockServer: in-memory FastMCP server (39 tools, camelCase args)
 ├── auth.py          # build_encrypted_token_storage + build_oauth (PKCE, DCR, auto-refresh)
@@ -87,7 +87,7 @@ Key design decisions:
    arguments, keep them camelCase and consistent with the docs, and update
    `EXPECTED_TOOLS` in `tests/test_mock_server.py`.
 4. **Token security.** OAuth tokens are stored encrypted at rest (Fernet) under
-   `~/.silpo_mcp` by default. Never log tokens; keep them server-side.
+   `~/.silpo_py_mcp` by default. Never log tokens; keep them server-side.
 
 ## Conventions
 

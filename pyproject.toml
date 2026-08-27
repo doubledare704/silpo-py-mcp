@@ -1,5 +1,5 @@
 [project]
-name = "silpo-mcp"
+name = "silpo-py-mcp"
 version = "0.1.0"
 description = "Typed Python client for the official Silpo MCP server (https://mcp.silpo.ua/mcp)"
 readme = "README.md"
@@ -61,5 +61,9 @@ addopts = "-q"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.6.2",
     "pyrefly>=1.2.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.4",
 ]

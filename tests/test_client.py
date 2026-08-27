@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from silpo_mcp import SilpoClient
-from silpo_mcp.models import (
+from silpo_py_mcp import SilpoClient
+from silpo_py_mcp.models import (
     Address,
     BatchProductResult,
     CartUpdateResult,

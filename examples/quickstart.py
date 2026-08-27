@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quickstart demo for silpo-mcp against the in-memory mock.
+"""Quickstart demo for silpo-py-mcp against the in-memory mock.
 
 Runs a realistic "fill the cart from a shopping list" flow:
 find address -> delivery types -> get cart -> search products ->
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 
-from silpo_mcp import SilpoClient
+from silpo_py_mcp import SilpoClient
 
 
 async def main() -> None:

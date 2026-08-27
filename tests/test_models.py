@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from silpo_mcp.models import (
+from silpo_py_mcp.models import (
     SilpoCart,
     SilpoProduct,
     TimeSlot,

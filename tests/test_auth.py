@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 from key_value.aio.adapters.pydantic import PydanticAdapter
 from mcp.shared.auth import OAuthToken
 
-from silpo_mcp.auth import (
+from silpo_py_mcp.auth import (
     SilpoOAuthError,
     build_encrypted_token_storage,
     build_oauth,
@@ -100,7 +100,7 @@ def test_storage_rejects_invalid_key(tmp_path: Path) -> None:
 
 
 def test_build_oauth_sets_public_client_auth_method() -> None:
-    oauth = build_oauth("https://mcp.silpo.ua/mcp", client_name="silpo-mcp")
+    oauth = build_oauth("https://mcp.silpo.ua/mcp", client_name="silpo-py-mcp")
     assert oauth.context.client_metadata.token_endpoint_auth_method == "none"
 
 

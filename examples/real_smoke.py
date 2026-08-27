@@ -14,8 +14,8 @@ import asyncio
 import sys
 from typing import Any
 
-from silpo_mcp import SilpoClient
-from silpo_mcp.exceptions import SilpoConnectionError
+from silpo_py_mcp import SilpoClient
+from silpo_py_mcp.exceptions import SilpoConnectionError
 
 EXPECTED_TOOLS: list[str] = [
     "silpo_find_address",

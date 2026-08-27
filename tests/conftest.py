@@ -1,4 +1,4 @@
-"""Shared fixtures for the silpo-mcp test suite."""
+"""Shared fixtures for the silpo-py-mcp test suite."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from silpo_mcp import SilpoClient, SilpoMockServer
+from silpo_py_mcp import SilpoClient, SilpoMockServer
 
 
 @pytest.fixture

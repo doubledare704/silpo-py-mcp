@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from silpo_mcp.models.base import SilpoModel
+from silpo_py_mcp.models.base import SilpoModel
 
 
 class CartItem(SilpoModel):
