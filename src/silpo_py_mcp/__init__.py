@@ -52,7 +52,7 @@ from silpo_py_mcp.exceptions import (
 from silpo_py_mcp.mock_server import SilpoMockServer
 from silpo_py_mcp.models import *  # noqa: F403
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "SILPO_MCP_URL",

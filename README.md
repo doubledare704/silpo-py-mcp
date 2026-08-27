@@ -1,4 +1,4 @@
-# silpo-py-mcp
+# silpo-py-mcp [![PyPI](https://img.shields.io/pypi/v/silpo-py-mcp)](https://pypi.org/project/silpo-py-mcp/) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://pypi.org/project/silpo-py-mcp/)
 
 Typed Python client for the official **Silpo** MCP server
 ([`https://mcp.silpo.ua/mcp`](https://ai-factory.silpo.ua/docs/mcp)).
@@ -19,8 +19,10 @@ Requires **Python 3.12+**.
 ## Install
 
 ```bash
-uv add silpo-py-mcp            # in your project
-# or, for local development of this package:
+pip install silpo-py-mcp
+# or with uv
+uv add silpo-py-mcp
+# local development
 uv sync
 ```
 
@@ -112,17 +114,16 @@ Failures are reported per check without aborting — server-side schema bugs and
 drift between the real server and the mock show up as `✗` lines. Exits
 non-zero if the tool-name contract is violated or a battery call fails.
 
-### Known server-side failures (verified live, Aug 2026)
+### Known server-side quirks (verified live, Aug 2026 — mitigated in `examples/real_smoke.py`)
 
-| Tool | Symptom | Root cause |
+| Tool | Symptom | Mitigation |
 |---|---|---|
-| `silpo_get_category` | fastmcp rejects the response: `Additional properties are not allowed ('id' was unexpected)` | the server declares an output schema with only `slug`/`title`, but returns `id` as well |
-| `silpo_get_products` | `Error in get-products: API returned 400 Bad Request` | backend rejects a request built from its own live schema |
-| `silpo_get_time_slots` | `-32602 Invalid arguments` for `deliveryTypes: ["B2B"]` | `silpo_get_available_delivery_types` returns `B2B`, but `silpo_get_time_slots`' enum does not accept it |
-| `silpo_get_my_certificates` | `Error in get-my-certificates: API returned 500 Internal Server Error` | server-side HTTP 500 |
-| `silpo_get_product_details` | fails with `slug: null` in the smoke battery | chain failure — no product slug was obtained because `silpo_get_products` returned 400 |
-
-opencode -s ses_fdff84746ffeyxZ0WSuLDho32B
+| `silpo_get_category` | fastmcp rejects response: `Additional properties are not allowed ('id' was unexpected)` | mock/client accept `id` — smoke now passes |
+| `silpo_get_products` | `400 Bad Request` on plain `limit` without filter | smoke uses `category` or `set: klatsniznyzhky` |
+| `silpo_get_time_slots` | `-32602` for `deliveryTypes: ["B2B"]` | smoke filters `B2B` from `get_available_delivery_types` |
+| `silpo_get_my_certificates` | `500 Internal Server Error` | treated as skipped (`AGENTS.md:128`) |
+| `silpo_get_my_favorites` | `Cannot read properties of null (reading 'id')` | treated as skipped — corrupted favorites entry |
+| `silpo_get_product_details` | `slug: null` chain failure | resolved once `get_products` returns real slugs |
 
 ### Configuration
 

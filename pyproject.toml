@@ -1,13 +1,13 @@
 [project]
 name = "silpo-py-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Typed Python client for the official Silpo MCP server (https://mcp.silpo.ua/mcp)"
 readme = "README.md"
 authors = [
     { name = "Oleksii", email = "doubledare704@gmail.com" }
 ]
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 keywords = ["mcp", "silpo", "client", "ai-factory", "groceries"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -26,6 +26,12 @@ dependencies = [
     "pathvalidate>=3.2",
     "cryptography>=42",
 ]
+
+[project.urls]
+Homepage = "https://github.com/doubledare704/silpo-py-mcp"
+Repository = "https://github.com/doubledare704/silpo-py-mcp"
+Issues = "https://github.com/doubledare704/silpo-py-mcp/issues"
+Documentation = "https://github.com/doubledare704/silpo-py-mcp#readme"
 
 [project.optional-dependencies]
 examples = []
