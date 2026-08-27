@@ -1,6 +1,6 @@
 [project]
 name = "silpo-py-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "Typed Python client for the official Silpo MCP server (https://mcp.silpo.ua/mcp)"
 readme = "README.md"
 authors = [

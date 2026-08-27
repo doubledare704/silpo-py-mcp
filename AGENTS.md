@@ -71,6 +71,7 @@ src/silpo_py_mcp/
 ├── auth.py          # build_encrypted_token_storage + build_oauth (PKCE, DCR, auto-refresh)
 ├── config.py        # SilpoSettings (env prefix SILPO_)
 ├── exceptions.py    # typed exception hierarchy
+├── tools.py         # SilpoTool StrEnum (39 silpo_* names, single source)
 └── models/          # Pydantic models; camelCase aliases + populate_by_name
 ```
 
@@ -85,7 +86,7 @@ Key design decisions:
    against the mock so the suite needs no network or Silpo credentials.
 3. **Mock arg names must match the real API.** If you add a mock tool or change
    arguments, keep them camelCase and consistent with the docs, and update
-   `EXPECTED_TOOLS` in `tests/test_mock_server.py`.
+   `SilpoTool` in `src/silpo_py_mcp/tools.py` (single source; `EXPECTED_TOOLS` derives from it).
 4. **Token security.** OAuth tokens are stored encrypted at rest (Fernet) under
    `~/.silpo_py_mcp` by default. Never log tokens; keep them server-side.
 

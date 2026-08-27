@@ -4,58 +4,13 @@ from __future__ import annotations
 
 from fastmcp import Client
 
-# Exact 39 tool names from the official Silpo docs (https://ai-factory.silpo.ua/docs/mcp).
-EXPECTED_TOOLS: list[str] = [
-    # Location & delivery (6)
-    "silpo_find_address",
-    "silpo_get_available_delivery_types",
-    "silpo_list_branches",
-    "silpo_get_time_slots",
-    "silpo_find_nova_poshta_settlements",
-    "silpo_find_nova_poshta_offices",
-    # Product search (7)
-    "silpo_find_products_batch",
-    "silpo_get_products",
-    "silpo_get_product_details",
-    "silpo_get_similar_products",
-    "silpo_get_replacements",
-    "silpo_get_my_favorites",
-    "silpo_add_or_update_favorite_products",
-    # Catalog (6)
-    "silpo_get_promotions",
-    "silpo_get_popular_categories",
-    "silpo_get_category",
-    "silpo_get_categories",
-    "silpo_get_categories_tree",
-    "silpo_get_product_sets",
-    # Cart (7)
-    "silpo_get_my_shopping_cart",
-    "silpo_get_shopping_cart_by_id",
-    "silpo_add_or_update_cart_products",
-    "silpo_remove_cart_products",
-    "silpo_clear_shopping_cart",
-    "silpo_update_shopping_cart",
-    "silpo_add_or_update_certificates",
-    # Orders (2)
-    "silpo_get_my_online_orders",
-    "silpo_get_my_offline_orders",
-    # Profile (4)
-    "silpo_get_my_profile",
-    "silpo_get_my_delivery_addresses",
-    "silpo_get_my_family",
-    "silpo_get_my_food_restrictions",
-    # Loyalty & promotions (7)
-    "silpo_get_loyalty_info",
-    "silpo_get_my_coupons",
-    "silpo_get_coupon_details",
-    "silpo_get_my_promos",
-    "silpo_get_promo_codes",
-    "silpo_get_my_certificates",
-    "silpo_get_my_premium_subscription",
-]
+from silpo_py_mcp import SilpoMockServer
+from silpo_py_mcp.tools import SilpoTool
+
+EXPECTED_TOOLS: list[str] = [t.value for t in SilpoTool]
 
 
-async def test_mock_exposes_all_39_documented_tools(mock_server: object) -> None:
+async def test_mock_exposes_all_39_documented_tools(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
         names = sorted(tool.name for tool in await client.list_tools())
@@ -63,7 +18,7 @@ async def test_mock_exposes_all_39_documented_tools(mock_server: object) -> None
     assert names == sorted(EXPECTED_TOOLS)
 
 
-async def test_mock_get_products_filters(mock_server: object) -> None:
+async def test_mock_get_products_filters(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
         result = await client.call_tool("silpo_get_products", {"query": "молоко"})
@@ -74,7 +29,7 @@ async def test_mock_get_products_filters(mock_server: object) -> None:
         assert on_sale.data["total"] == 2
 
 
-async def test_mock_cart_lifecycle(mock_server: object) -> None:
+async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
         summary = await client.call_tool("silpo_get_my_shopping_cart", {})
@@ -98,7 +53,7 @@ async def test_mock_cart_lifecycle(mock_server: object) -> None:
         assert clear.data["cart"]["totals"]["totalPrice"] == 0.0
 
 
-async def test_mock_apply_bonuses(mock_server: object) -> None:
+async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
         summary = await client.call_tool("silpo_get_my_shopping_cart", {})
