@@ -262,7 +262,10 @@ class SilpoClient:
         if value is None:
             raise ValueError("find_address requires text or address")
         payload = await self.call_tool(SilpoTool.FIND_ADDRESS, {"text": value, "address": value})
-        return self._validate(payload, Address)
+        addresses = payload.get("addresses") if isinstance(payload, dict) else None
+        if not addresses:
+            raise SilpoValidationError("No addresses found in response")
+        return self._validate(addresses[0], Address)
 
     async def get_available_delivery_types(
         self,
@@ -287,16 +290,30 @@ class SilpoClient:
         has_pickup: bool | None = None,
         has_nova_poshta: bool | None = None,
         limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Branch]:
-        """List Silpo branches, optionally filtered."""
+        """List Silpo branches, optionally filtered.
+
+        The real server returns an envelope (``{"branches": [...], ...}``) and
+        expects ``hasNP`` for the Nova Poshta filter; the mock returns a bare
+        list and expects ``hasNovaPoshta``. Both shapes are accepted/sent.
+        """
         args: dict[str, Any] = {}
         if has_pickup is not None:
             args["hasPickup"] = has_pickup
         if has_nova_poshta is not None:
             args["hasNovaPoshta"] = has_nova_poshta
+            args["hasNP"] = has_nova_poshta
         if limit is not None:
             args["limit"] = limit
+        if offset is not None:
+            args["offset"] = offset
         payload = await self.call_tool(SilpoTool.LIST_BRANCHES, args)
+        if isinstance(payload, dict):
+            for key in ("branches", "items", "data", "results"):
+                if isinstance(payload.get(key), list):
+                    payload = payload[key]
+                    break
         return self._validate(payload, Branch, many=True)
 
     async def get_time_slots(

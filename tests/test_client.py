@@ -27,6 +27,7 @@ async def test_list_tools(client: SilpoClient) -> None:
 
 async def test_location_group(client: SilpoClient) -> None:
     address: Address = await client.find_address("Київ, вул. Анни Ахматової, 9")
+    assert address.coordinates is not None
     assert address.coordinates.lat == 50.3957
 
     delivery = await client.get_available_delivery_types(50.0, 30.0)

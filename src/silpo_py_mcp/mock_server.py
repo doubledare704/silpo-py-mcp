@@ -200,12 +200,13 @@ PRODUCT_SETS: list[dict[str, Any]] = [
 
 FIXTURE_ADDRESSES = [
     {
-        "text": "Київ, вул. Анни Ахматової, 9",
-        "coordinates": {"lat": 50.3957, "lng": 30.6217},
-        "region": "Київська обл.",
+        "address": "Київ, вул. Анни Ахматової, 9",
         "city": "Київ",
         "street": "вул. Анни Ахматової",
         "houseNumber": "9",
+        "district": "Печерськ",
+        "latitude": 50.3957,
+        "longitude": 30.6217,
     },
 ]
 
@@ -335,7 +336,7 @@ class SilpoMockServer:
         ) -> dict[str, Any]:
             """Find coordinates (lat/lng) for an address string."""
             _ = address or text
-            return FIXTURE_ADDRESSES[0]
+            return {"success": True, "summary": "Found 1 address", "addresses": FIXTURE_ADDRESSES[:1]}
 
         @self._fastmcp.tool
         def silpo_get_available_delivery_types(
