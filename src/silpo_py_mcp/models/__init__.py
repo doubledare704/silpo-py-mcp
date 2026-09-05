@@ -21,6 +21,7 @@ from .cart import (
     CartTotals,
     CartUpdateResult,
     CartValidation,
+    CreateShoppingCartResult,
     SilpoCart,
 )
 from .category import (
@@ -75,6 +76,7 @@ __all__ = [
     "Certificate",
     "Coupon",
     "CouponDetail",
+    "CreateShoppingCartResult",
     "DeliveryAddress",
     "DeliveryType",
     "FamilyMember",

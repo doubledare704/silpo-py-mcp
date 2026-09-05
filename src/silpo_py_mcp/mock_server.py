@@ -1,7 +1,7 @@
 """In-memory FastMCP mock server implementing the Silpo ``silpo_*`` tools.
 
 Used for development and testing without a live Silpo account. The mock
-mirrors the 39 documented tools with realistic fixtures and per-client
+mirrors the 40 documented tools with realistic fixtures and per-client
 cart state. Connect to it in-memory:
 
     from silpo_py_mcp.mock_server import SilpoMockServer
@@ -734,12 +734,81 @@ class SilpoMockServer:
             _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit)
             return PRODUCT_SETS
 
-    # Cart (7)
+    # Cart (8)
     def _register_cart_tools(self) -> None:
         @self._fastmcp.tool
         def silpo_get_my_shopping_cart(context: Context) -> dict[str, Any]:
             """Return the ID of the active cart."""
             return {"cartId": self._ensure_cart(self._session_key(context))}
+
+        @self._fastmcp.tool
+        def silpo_create_shopping_cart(
+            context: Context,
+            addressType: str,
+            latitude: float | str,
+            longitude: float | str,
+            deliveryType: str,
+            branchId: str,
+            timeslot: dict[str, Any] | None = None,
+            timeslotStart: str | None = None,
+            timeslotEnd: str | None = None,
+            city: str | None = None,
+            street: str | None = None,
+            house: str | None = None,
+            district: str | None = None,
+        ) -> dict[str, Any]:
+            """Create a cart; idempotent — returns the existing cart when present."""
+            session_key = self._session_key(context)
+            if session_key is not None:
+                existing_id = SilpoMockServer._mock_carts.get(session_key)
+                if existing_id is not None and existing_id in self._carts:
+                    return {
+                        "success": True,
+                        "summary": "Shopping cart already exists",
+                        "shoppingCartId": existing_id,
+                    }
+            slot = timeslot
+            if slot is None and (timeslotStart is not None or timeslotEnd is not None):
+                slot = {"start": timeslotStart, "end": timeslotEnd}
+            cart_id = f"cart-{uuid.uuid4().hex[:8]}"
+            self._carts[cart_id] = {
+                "cartId": cart_id,
+                "branchId": branchId,
+                "deliveryType": deliveryType,
+                "timeslot": slot,
+                "address": {
+                    "addressType": addressType,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "city": city,
+                    "street": street,
+                    "house": house,
+                    "district": district,
+                },
+                "items": [],
+                "totals": {
+                    "totalPrice": 0.0,
+                    "itemsPrice": 0.0,
+                    "deliveryPrice": 0.0,
+                    "discount": 0.0,
+                },
+                "loyalty": {
+                    "isEnabled": True,
+                    "bonusAvailable": 125.5,
+                    "bonusRequested": None,
+                    "bonusApplied": 0.0,
+                },
+                "validations": [],
+                "checkoutWebLink": f"https://silpo.ua/cart/{cart_id}",
+                "checkoutMobileLink": f"silpo://cart/{cart_id}",
+            }
+            if session_key is not None:
+                SilpoMockServer._mock_carts[session_key] = cart_id
+            return {
+                "success": True,
+                "summary": "Shopping cart created",
+                "shoppingCartId": cart_id,
+            }
 
         @self._fastmcp.tool
         def silpo_get_shopping_cart_by_id(

@@ -6,9 +6,11 @@ from silpo_py_mcp import SilpoClient
 from silpo_py_mcp.models import (
     Address,
     BatchProductResult,
+    CartSummary,
     CartUpdateResult,
     Category,
     Coupon,
+    CreateShoppingCartResult,
     LoyaltyInfo,
     ProductSearchResult,
     SilpoCart,
@@ -19,7 +21,7 @@ from silpo_py_mcp.models import (
 
 async def test_list_tools(client: SilpoClient) -> None:
     tools = await client.list_tools()
-    assert len(tools) == 39
+    assert len(tools) == 40
     assert all(tool.name.startswith("silpo_") for tool in tools)
 
 
@@ -84,7 +86,8 @@ async def test_catalog_group(client: SilpoClient) -> None:
 
 async def test_full_cart_workflow(client: SilpoClient) -> None:
     cart = await client.get_cart()
-    cart_id = cart.cart_id
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
 
     added: CartUpdateResult = await client.add_or_update_cart_products(
         cart_id,
@@ -115,6 +118,47 @@ async def test_full_cart_workflow(client: SilpoClient) -> None:
 
     cleared = await client.clear_cart(cart_id)
     assert cleared.cart.items == []
+
+
+async def test_create_shopping_cart(client: SilpoClient) -> None:
+    created: CreateShoppingCartResult = await client.create_shopping_cart(
+        address_type="house",
+        latitude=50.3957,
+        longitude=30.6217,
+        delivery_type="DeliveryHome",
+        branch_id="bran-1",
+        timeslot_start="2026-09-06T10:00:00+03:00",
+        timeslot_end="2026-09-06T11:00:00+03:00",
+        city="Київ",
+        street="вул. Анни Ахматової",
+        house="9",
+    )
+    assert created.success is True
+    assert created.shopping_cart_id
+
+    again = await client.create_shopping_cart(
+        address_type="house",
+        latitude=50.3957,
+        longitude=30.6217,
+        delivery_type="DeliveryHome",
+        branch_id="bran-1",
+        timeslot_start="2026-09-06T10:00:00+03:00",
+        timeslot_end="2026-09-06T11:00:00+03:00",
+    )
+    assert again.shopping_cart_id == created.shopping_cart_id
+
+    summary: CartSummary = await client.get_cart()
+    assert summary.resolved_cart_id == created.shopping_cart_id
+
+    fetched: SilpoCart = await client.get_cart_by_id(created.shopping_cart_id)
+    assert fetched.branch_id == "bran-1"
+    assert fetched.delivery_type == "DeliveryHome"
+
+
+async def test_cart_summary_exists_false() -> None:
+    summary = CartSummary.model_validate({"exists": False})
+    assert summary.exists is False
+    assert summary.resolved_cart_id is None
 
 
 async def test_orders_profile_loyalty_groups(client: SilpoClient) -> None:

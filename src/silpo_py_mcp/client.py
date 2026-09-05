@@ -50,6 +50,7 @@ from silpo_py_mcp.models import (
     Certificate,
     Coupon,
     CouponDetail,
+    CreateShoppingCartResult,
     DeliveryAddress,
     FamilyMember,
     FoodRestrictions,
@@ -577,12 +578,53 @@ class SilpoClient:
         payload = await self.call_tool(SilpoTool.GET_PRODUCT_SETS, args)
         return self._validate(payload, ProductSet, many=True)
 
-    # -- Cart (7) -----------------------------------------------------------
+    # -- Cart (8) -----------------------------------------------------------
 
     async def get_cart(self) -> CartSummary:
         """Return the ID of the active cart (always the first step)."""
         payload = await self.call_tool(SilpoTool.GET_MY_SHOPPING_CART, {})
         return self._validate(payload, CartSummary)
+
+    async def create_shopping_cart(
+        self,
+        *,
+        address_type: str,
+        latitude: float | str,
+        longitude: float | str,
+        delivery_type: str,
+        branch_id: str,
+        timeslot_start: str,
+        timeslot_end: str,
+        city: str | None = None,
+        street: str | None = None,
+        house: str | None = None,
+        district: str | None = None,
+    ) -> CreateShoppingCartResult:
+        """Create a cart when ``get_cart`` reports ``exists: false``.
+
+        Idempotent: if a cart already exists the server returns the existing
+        ``shoppingCartId``. Resolve ``latitude``/``longitude`` via
+        ``find_address``, ``delivery_type``/``branch_id`` via
+        ``get_available_delivery_types`` and the slot via ``get_time_slots``.
+        """
+        args: dict[str, Any] = {
+            "addressType": address_type,
+            "latitude": latitude,
+            "longitude": longitude,
+            "deliveryType": delivery_type,
+            "branchId": branch_id,
+            "timeslot": {"start": timeslot_start, "end": timeslot_end},
+        }
+        if city is not None:
+            args["city"] = city
+        if street is not None:
+            args["street"] = street
+        if house is not None:
+            args["house"] = house
+        if district is not None:
+            args["district"] = district
+        payload = await self.call_tool(SilpoTool.CREATE_SHOPPING_CART, args)
+        return self._validate(payload, CreateShoppingCartResult)
 
     async def get_cart_by_id(self, cart_id: str) -> SilpoCart:
         """Return the full cart: items, delivery, slot, sums, validations."""

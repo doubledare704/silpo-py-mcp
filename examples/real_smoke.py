@@ -38,6 +38,7 @@ EXPECTED_TOOLS: list[str] = [
     "silpo_get_categories_tree",
     "silpo_get_product_sets",
     "silpo_get_my_shopping_cart",
+    "silpo_create_shopping_cart",
     "silpo_get_shopping_cart_by_id",
     "silpo_add_or_update_cart_products",
     "silpo_remove_cart_products",
@@ -638,7 +639,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
             retries=1,
         )
 
-    # -- cart (7) ----------------------------------------------------------
+    # -- cart (8) ----------------------------------------------------------
     cart_summary = await check("silpo_get_my_shopping_cart", {}, retries=1)
     cart_id = None
     if isinstance(cart_summary, dict):
@@ -652,6 +653,21 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
             cart_id = cart_summary["cart"].get("shoppingCartId") or cart_summary["cart"].get("cartId")
         if not cart_id and isinstance(cart_summary.get("shoppingCart"), dict):
             cart_id = cart_summary["shoppingCart"].get("shoppingCartId")
+    if not cart_id and isinstance(cart_summary, dict) and cart_summary.get("exists") is False:
+        created = await check(
+            "silpo_create_shopping_cart",
+            {
+                "addressType": "house",
+                "latitude": state["latitude"],
+                "longitude": state["longitude"],
+                "deliveryType": state.get("deliveryType", "DeliveryHome"),
+                "branchId": state.get("branchId"),
+                "timeslot": {"start": state["timeslotStart"], "end": state["timeslotEnd"]},
+            },
+            retries=1,
+        )
+        if isinstance(created, dict):
+            cart_id = created.get("shoppingCartId") or created.get("cartId")
     if cart_id:
         state["cartId"] = cart_id
         state["shoppingCartId"] = cart_id

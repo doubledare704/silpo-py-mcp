@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import Field
 
 from silpo_py_mcp.models.base import SilpoModel
@@ -54,8 +56,8 @@ class SilpoCart(SilpoModel):
     cart_id: str = Field(alias="cartId")
     branch_id: str = Field(alias="branchId")
     delivery_type: str = Field(alias="deliveryType")
-    timeslot: str | None = None
-    address: str | None = None
+    timeslot: str | dict[str, Any] | None = None
+    address: str | dict[str, Any] | None = None
     items: list[CartItem] = Field(default_factory=list)
     totals: CartTotals
     loyalty: CartLoyalty = Field(default_factory=CartLoyalty)
@@ -67,9 +69,29 @@ class SilpoCart(SilpoModel):
 
 
 class CartSummary(SilpoModel):
-    """Minimal cart identifier, from ``silpo_get_my_shopping_cart``."""
+    """Minimal cart identifier, from ``silpo_get_my_shopping_cart``.
 
-    cart_id: str = Field(alias="cartId")
+    The server returns ``exists: false`` when the guest has no cart yet —
+    in that case call ``silpo_create_shopping_cart``. Otherwise it returns
+    the cart id as ``cartId`` (mock/documented) or ``shoppingCartId`` (live).
+    """
+
+    cart_id: str | None = Field(default=None, alias="cartId")
+    shopping_cart_id: str | None = Field(default=None, alias="shoppingCartId")
+    exists: bool = True
+
+    @property
+    def resolved_cart_id(self) -> str | None:
+        """Return whichever cart id variant the server provided, if any."""
+        return self.shopping_cart_id or self.cart_id
+
+
+class CreateShoppingCartResult(SilpoModel):
+    """Result of ``silpo_create_shopping_cart``."""
+
+    success: bool = True
+    summary: str | None = None
+    shopping_cart_id: str = Field(alias="shoppingCartId")
 
 
 class CartLineInput(SilpoModel):

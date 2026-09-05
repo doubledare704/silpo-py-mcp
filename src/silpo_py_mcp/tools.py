@@ -8,7 +8,7 @@ __all__ = ["SilpoTool"]
 
 
 class SilpoTool(StrEnum):
-    """Typed enumeration of the 39 documented ``silpo_*`` tools."""
+    """Typed enumeration of the 40 documented ``silpo_*`` tools."""
 
     # Location & delivery (6)
     FIND_ADDRESS = "silpo_find_address"
@@ -32,8 +32,9 @@ class SilpoTool(StrEnum):
     GET_CATEGORIES = "silpo_get_categories"
     GET_CATEGORIES_TREE = "silpo_get_categories_tree"
     GET_PRODUCT_SETS = "silpo_get_product_sets"
-    # Cart (7)
+    # Cart (8)
     GET_MY_SHOPPING_CART = "silpo_get_my_shopping_cart"
+    CREATE_SHOPPING_CART = "silpo_create_shopping_cart"
     GET_SHOPPING_CART_BY_ID = "silpo_get_shopping_cart_by_id"
     ADD_OR_UPDATE_CART_PRODUCTS = "silpo_add_or_update_cart_products"
     REMOVE_CART_PRODUCTS = "silpo_remove_cart_products"

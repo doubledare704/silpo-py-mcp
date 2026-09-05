@@ -7,9 +7,9 @@ Built on [FastMCP `3.4.7`](https://gofastmcp.com/) for the *Silpo AI Factory*
 hackathon. One library, two modes:
 
 - **Real server** — Streamable HTTP transport with OAuth 2.1 + PKCE, encrypted
-  on-disk token storage, 39 typed methods mirroring the documented
+  on-disk token storage, 40 typed methods mirroring the documented
   `silpo_*` tools.
-- **In-memory mock** — a FastMCP server that implements the same 39 tools with
+- **In-memory mock** — a FastMCP server that implements the same 40 tools with
   realistic fixtures, so you can develop and test without a Silpo account.
 
 Requires **Python 3.12+**.
@@ -104,7 +104,7 @@ uv run examples/real_smoke.py
 On the first run a browser opens for login at `auth.silpo.ua`; afterwards the
 encrypted token in `~/.silpo_py_mcp` is reused. The script checks:
 
-- live `tools/list` matches the 39 documented tools and prints every live
+- live `tools/list` matches the 40 documented tools and prints every live
   signature (arg names/types),
 - a read-only battery of `call_tool` calls built from the live schemas
   (branches, address, delivery types, time slots, categories tree, promotions,
@@ -188,7 +188,7 @@ uv run pre-commit install  # install git hooks (format/lint/type/tests)
 ```
 src/silpo_py_mcp/
 ├── client.py          # SilpoClient — typed methods + error mapping
-├── mock_server.py     # SilpoMockServer — in-memory FastMCP server (39 tools)
+├── mock_server.py     # SilpoMockServer — in-memory FastMCP server (40 tools)
 ├── auth.py            # OAuth 2.1 + PKCE helper, encrypted token storage
 ├── config.py          # pydantic-settings configuration
 ├── exceptions.py      # typed exceptions

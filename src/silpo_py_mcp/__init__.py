@@ -69,6 +69,7 @@ from silpo_py_mcp.models import (
     Certificate,
     Coupon,
     CouponDetail,
+    CreateShoppingCartResult,
     DeliveryAddress,
     DeliveryType,
     FamilyMember,
@@ -97,7 +98,7 @@ from silpo_py_mcp.models import (
 )
 from silpo_py_mcp.tools import SilpoTool
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 __all__ = [
     "SILPO_MCP_URL",
@@ -119,6 +120,7 @@ __all__ = [
     "Certificate",
     "Coupon",
     "CouponDetail",
+    "CreateShoppingCartResult",
     "DeliveryAddress",
     "DeliveryType",
     "FamilyMember",

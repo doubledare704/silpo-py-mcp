@@ -12,7 +12,7 @@ Two connection modes with the **same client interface**:
 
 - **Real server**: Streamable HTTP transport + OAuth 2.1/PKCE, encrypted disk
   token storage. First connection opens a browser for login at `auth.silpo.ua`.
-- **In-memory mock**: `SilpoMockServer` — a FastMCP server implementing the 39
+- **In-memory mock**: `SilpoMockServer` — a FastMCP server implementing the 40
   documented `silpo_*` tools with realistic fixtures. No network/auth needed.
 
 ## Commands
@@ -35,7 +35,7 @@ Validation gate (also installed as pre-commit hooks):
 `ruff format --check` → `ruff check --fix` → `pyrefly check` → `pytest`.
 Always run all four before finishing a change.
 
-## Tool mapping (39 documented tools)
+## Tool mapping (40 documented tools)
 
 The official docs live at <https://ai-factory.silpo.ua/docs/mcp>. Exact
 schemas are only known at runtime via `tools/list` after auth. Tool names,
@@ -47,7 +47,7 @@ takes `pageSize`, `categoryId`, `onSale`). The mock mirrors these exactly.
 | Location/delivery (6) | `silpo_find_address`, `silpo_get_available_delivery_types`, `silpo_list_branches`, `silpo_get_time_slots`, `silpo_find_nova_poshta_settlements`, `silpo_find_nova_poshta_offices` |
 | Product search (7) | `silpo_find_products_batch`, `silpo_get_products`, `silpo_get_product_details`, `silpo_get_similar_products`, `silpo_get_replacements`, `silpo_get_my_favorites`, `silpo_add_or_update_favorite_products` |
 | Catalog (6) | `silpo_get_promotions`, `silpo_get_popular_categories`, `silpo_get_category`, `silpo_get_categories`, `silpo_get_categories_tree`, `silpo_get_product_sets` |
-| Cart (7) | `silpo_get_my_shopping_cart`, `silpo_get_shopping_cart_by_id`, `silpo_add_or_update_cart_products`, `silpo_remove_cart_products`, `silpo_clear_shopping_cart`, `silpo_update_shopping_cart`, `silpo_add_or_update_certificates` |
+| Cart (8) | `silpo_get_my_shopping_cart`, `silpo_create_shopping_cart`, `silpo_get_shopping_cart_by_id`, `silpo_add_or_update_cart_products`, `silpo_remove_cart_products`, `silpo_clear_shopping_cart`, `silpo_update_shopping_cart`, `silpo_add_or_update_certificates` |
 | Orders (2) | `silpo_get_my_online_orders`, `silpo_get_my_offline_orders` |
 | Profile (4) | `silpo_get_my_profile`, `silpo_get_my_delivery_addresses`, `silpo_get_my_family`, `silpo_get_my_food_restrictions` |
 | Loyalty (7) | `silpo_get_loyalty_info`, `silpo_get_my_coupons`, `silpo_get_coupon_details`, `silpo_get_my_promos`, `silpo_get_promo_codes`, `silpo_get_my_certificates`, `silpo_get_my_premium_subscription` |
@@ -67,11 +67,11 @@ takes `pageSize`, `categoryId`, `onSale`). The mock mirrors these exactly.
 ```
 src/silpo_py_mcp/
 ├── client.py        # SilpoClient: typed methods + call_tool passthrough + error mapping
-├── mock_server.py   # SilpoMockServer: in-memory FastMCP server (39 tools, camelCase args)
+├── mock_server.py   # SilpoMockServer: in-memory FastMCP server (40 tools, camelCase args)
 ├── auth.py          # build_encrypted_token_storage + build_oauth (PKCE, DCR, auto-refresh)
 ├── config.py        # SilpoSettings (env prefix SILPO_)
 ├── exceptions.py    # typed exception hierarchy
-├── tools.py         # SilpoTool StrEnum (39 silpo_* names, single source)
+├── tools.py         # SilpoTool StrEnum (40 silpo_* names, single source)
 └── models/          # Pydantic models; camelCase aliases + populate_by_name
 ```
 
