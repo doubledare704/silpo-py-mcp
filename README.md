@@ -35,7 +35,13 @@ from silpo_py_mcp import SilpoClient
 
 async def main() -> None:
     async with SilpoClient.for_mock() as client:
-        result = await client.get_products(query="сир")
+        result = await client.get_products(
+            "bran-1",
+            "DeliveryHome",
+            "2026-09-06T10:00:00+03:00",
+            "2026-09-06T11:00:00+03:00",
+            category="Молочні продукти",
+        )
         for product in result.items:
             print(product.title, product.price)
 
@@ -82,15 +88,13 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-> **Note on typed methods vs the real server.** The real `tools/list` schemas
-> (which `call_tool` follows verbatim) differ from the documented ones the
-> mock is built on — e.g. `silpo_get_products` takes `branchId`/`deliveryType`/
-> `timeslotStart`/`timeslotEnd`, `silpo_find_address` takes `address`,
-> `silpo_get_category` takes `categorySlug`, and cart tools take
-> `shoppingCartId`. The typed convenience methods still target the documented
-> names; use `call_tool` for live calls until they are reconciled. Responses
-> come back JSON-like (nested FastMCP `Root` dataclasses are unwrapped
-> automatically).
+> **Note on typed methods vs the real server.** The typed methods and the mock
+> mirror the live `tools/list` schemas (verified Sep 2026): context arguments
+> such as `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required
+> where the live schema requires them, cart tools take `shoppingCartId`, and
+> `silpo_add_or_update_cart_products` takes `products`. `call_tool` always
+> passes arguments through verbatim for one-off calls. Responses come back
+> JSON-like (nested FastMCP `Root` dataclasses are unwrapped automatically).
 
 ### Smoke test against the real server
 
@@ -114,16 +118,20 @@ Failures are reported per check without aborting — server-side schema bugs and
 drift between the real server and the mock show up as `✗` lines. Exits
 non-zero if the tool-name contract is violated or a battery call fails.
 
-### Known server-side quirks (verified live, Aug 2026 — mitigated in `examples/real_smoke.py`)
+### Known server-side quirks (re-verified live, Sep 2026 — mitigated in `examples/real_smoke.py`)
 
 | Tool | Symptom | Mitigation |
 |---|---|---|
-| `silpo_get_category` | fastmcp rejects response: `Additional properties are not allowed ('id' was unexpected)` | mock/client accept `id` — smoke now passes |
 | `silpo_get_products` | `400 Bad Request` on plain `limit` without filter | smoke uses `category` or `set: klatsniznyzhky` |
 | `silpo_get_time_slots` | `-32602` for `deliveryTypes: ["B2B"]` | smoke filters `B2B` from `get_available_delivery_types` |
-| `silpo_get_my_certificates` | `500 Internal Server Error` | treated as skipped (`AGENTS.md:128`) |
 | `silpo_get_my_favorites` | `Cannot read properties of null (reading 'id')` | treated as skipped — corrupted favorites entry |
 | `silpo_get_product_details` | `slug: null` chain failure | resolved once `get_products` returns real slugs |
+
+Previously reported quirks that no longer reproduce (re-verified live, Sep 2026):
+`silpo_get_category` no longer triggers the fastmcp `id` rejection (it validates
+cleanly), and `silpo_get_my_certificates` — although still intermittently returning
+HTTP 500 — now responds with a normal `certificates` envelope (unwrapped by the
+client) that validates cleanly when it does respond.
 
 ### Configuration
 
@@ -152,7 +160,7 @@ The exact tool schemas (arguments, JSON Schema) are only known from
 
 - **`list_tools()`** — the live schemas from the server.
 - **`call_tool(name, arguments)`** — pass-through calls with typed error mapping.
-- **Typed convenience methods** — stable wrappers over documented tool names
+- **Typed convenience methods** — wrappers over the live tool schemas
   (`get_products`, `get_cart_by_id`, `add_or_update_cart_products`, ...).
 
 If Silpo renames or reshapes tools, only the affected convenience method needs
@@ -176,7 +184,7 @@ updating; `call_tool` keeps working.
 
 ```bash
 uv sync                  # install deps
-uv run pytest            # run tests (32 tests, all against the in-memory mock)
+uv run pytest            # run tests (39 tests, all against the in-memory mock)
 uv run ruff format .     # format
 uv run ruff check .      # lint
 uv run pyrefly check     # type check (strict)

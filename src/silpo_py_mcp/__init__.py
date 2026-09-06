@@ -10,7 +10,9 @@ Quick start (against the mock):
 
     server = SilpoMockServer()
     async with SilpoClient.from_fastmcp(Client(server.fastmcp)) as client:
-        products = await client.get_products(query="сир")
+        products = await client.get_products(
+            "bran-1", "DeliveryHome", "2026-09-06T10:00:00+03:00", "2026-09-06T11:00:00+03:00"
+        )
 
 Quick start (against the real server):
 

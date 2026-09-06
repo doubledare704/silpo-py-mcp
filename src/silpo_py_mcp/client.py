@@ -250,6 +250,26 @@ class SilpoClient:
         except Exception as exc:
             raise SilpoValidationError(f"Response did not match {model.__name__}: {exc}") from exc
 
+    @staticmethod
+    def _unwrap_payload(payload: Any, *keys: str) -> Any:
+        """Unwrap a live envelope (``{success, summary, <key>, ...}``) into its data.
+
+        Returns the payload unchanged when it is already a list or when none of
+        the keys holds a list, so the mock's documented responses pass through
+        untouched.
+        """
+        if not isinstance(payload, dict):
+            return payload
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                for inner in ("items", "list", "results", "products"):
+                    if isinstance(value.get(inner), list):
+                        return value[inner]
+        return payload
+
     # -- Location & delivery (6) --------------------------------------------
 
     async def find_address(
@@ -261,7 +281,7 @@ class SilpoClient:
         value = address if address is not None else text
         if value is None:
             raise ValueError("find_address requires text or address")
-        payload = await self.call_tool(SilpoTool.FIND_ADDRESS, {"text": value, "address": value})
+        payload = await self.call_tool(SilpoTool.FIND_ADDRESS, {"address": value})
         addresses = payload.get("addresses") if isinstance(payload, dict) else None
         if not addresses:
             raise SilpoValidationError("No addresses found in response")
@@ -281,8 +301,9 @@ class SilpoClient:
             raise ValueError("get_available_delivery_types requires lat/lng or latitude/longitude")
         payload = await self.call_tool(
             SilpoTool.GET_AVAILABLE_DELIVERY_TYPES,
-            {"lat": lat_val, "lng": lng_val, "latitude": lat_val, "longitude": lng_val},
+            {"latitude": lat_val, "longitude": lng_val},
         )
+        payload = self._unwrap_payload(payload, "options")
         return self._validate(payload, AvailableDeliveryType, many=True)
 
     async def list_branches(
@@ -294,15 +315,13 @@ class SilpoClient:
     ) -> list[Branch]:
         """List Silpo branches, optionally filtered.
 
-        The real server returns an envelope (``{"branches": [...], ...}``) and
-        expects ``hasNP`` for the Nova Poshta filter; the mock returns a bare
-        list and expects ``hasNovaPoshta``. Both shapes are accepted/sent.
+        The real server returns an envelope (``{"branches": [...], ...}``);
+        the mock returns a bare list.
         """
         args: dict[str, Any] = {}
         if has_pickup is not None:
             args["hasPickup"] = has_pickup
         if has_nova_poshta is not None:
-            args["hasNovaPoshta"] = has_nova_poshta
             args["hasNP"] = has_nova_poshta
         if limit is not None:
             args["limit"] = limit
@@ -321,15 +340,23 @@ class SilpoClient:
         branch_id: str,
         delivery_type: str | None = None,
         delivery_types: list[str] | None = None,
+        limit: int | None = None,
+        start: str | None = None,
+        end: str | None = None,
     ) -> list[TimeSlot]:
         """Return delivery time slots for a branch (call after getting the cart)."""
         dtype = delivery_type or (delivery_types[0] if delivery_types else None)
         if dtype is None:
             raise ValueError("get_time_slots requires delivery_type or delivery_types")
-        payload = await self.call_tool(
-            SilpoTool.GET_TIME_SLOTS,
-            {"branchId": branch_id, "deliveryType": dtype, "deliveryTypes": [dtype]},
-        )
+        args: dict[str, Any] = {"branchId": branch_id, "deliveryTypes": [dtype]}
+        if limit is not None:
+            args["limit"] = limit
+        if start is not None:
+            args["start"] = start
+        if end is not None:
+            args["end"] = end
+        payload = await self.call_tool(SilpoTool.GET_TIME_SLOTS, args)
+        payload = self._unwrap_payload(payload, "slots")
         return self._validate(payload, TimeSlot, many=True)
 
     async def find_nova_poshta_settlements(
@@ -341,258 +368,284 @@ class SilpoClient:
         value = query if query is not None else settlement_name
         if value is None:
             raise ValueError("find_nova_poshta_settlements requires query or settlement_name")
-        payload = await self.call_tool(
-            SilpoTool.FIND_NOVA_POSHTA_SETTLEMENTS, {"query": value, "settlementName": value}
-        )
+        payload = await self.call_tool(SilpoTool.FIND_NOVA_POSHTA_SETTLEMENTS, {"title": value})
+        payload = self._unwrap_payload(payload, "settlements")
         return self._validate(payload, NovaPoshtaSettlement, many=True)
 
     async def find_nova_poshta_offices(self, settlement_id: str) -> list[NovaPoshtaOffice]:
         """Find Nova Poshta offices/postomats in a settlement."""
-        payload = await self.call_tool(
-            SilpoTool.FIND_NOVA_POSHTA_OFFICES, {"settlementId": settlement_id, "settlement_id": settlement_id}
-        )
+        payload = await self.call_tool(SilpoTool.FIND_NOVA_POSHTA_OFFICES, {"settlementId": settlement_id})
+        payload = self._unwrap_payload(payload, "offices")
         return self._validate(payload, NovaPoshtaOffice, many=True)
 
     # -- Product search (7) -------------------------------------------------
 
-    async def find_products_batch(self, queries: list[str], limit: int = 1) -> BatchProductResult:
+    async def find_products_batch(
+        self,
+        branch_id: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
+        queries: list[str],
+        limit: int | None = None,
+    ) -> BatchProductResult:
         """Search up to 30 products in parallel from a shopping list."""
-        items = [{"query": q, "limit": limit} for q in queries]
-        payload = await self.call_tool(SilpoTool.FIND_PRODUCTS_BATCH, {"items": items, "queries": queries})
+        args: dict[str, Any] = {
+            "branchId": branch_id,
+            "deliveryType": delivery_type,
+            "timeslotStart": timeslot_start,
+            "timeslotEnd": timeslot_end,
+            "products": queries,
+        }
+        if limit is not None:
+            args["limit"] = limit
+        payload = await self.call_tool(SilpoTool.FIND_PRODUCTS_BATCH, args)
+        if isinstance(payload, dict) and isinstance(payload.get("queries"), list):
+            results: dict[str, Any] = {}
+            unmatched: list[str] = []
+            for entry in payload["queries"]:
+                query = entry.get("query")
+                matches = entry.get("products") or []
+                if query and matches:
+                    results[query] = matches
+                elif query:
+                    unmatched.append(query)
+            payload = {"results": results, "unmatched": unmatched}
         return self._validate(payload, BatchProductResult)
 
     async def get_products(
         self,
-        query: str | None = None,
-        category_id: str | None = None,
-        on_sale: bool | None = None,
-        page: int = 1,
-        page_size: int = 20,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
+        branch_id: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
+        *,
+        category: str | None = None,
+        promotion_code: str | None = None,
+        in_stock: bool | None = None,
+        must_have_promotion: bool | None = None,
+        product_set: str | None = None,
         limit: int | None = None,
-        category_slug: str | None = None,
+        offset: int | None = None,
+        sort_by: str | None = None,
+        sort_direction: str | None = None,
+        from_price: float | None = None,
+        to_price: float | None = None,
     ) -> ProductSearchResult:
-        """Products with filters: category, promotion, search, pagination."""
-        args: dict[str, Any] = {"page": page, "pageSize": page_size}
-        if query is not None:
-            args["query"] = query
-        if category_id is not None:
-            args["categoryId"] = category_id
-        if category_slug is not None:
-            args["categorySlug"] = category_slug
-        if on_sale is not None:
-            args["onSale"] = on_sale
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
+        """Products with filters: category, promotion, stock, price, pagination."""
+        args: dict[str, Any] = {
+            "branchId": branch_id,
+            "deliveryType": delivery_type,
+            "timeslotStart": timeslot_start,
+            "timeslotEnd": timeslot_end,
+        }
+        if category is not None:
+            args["category"] = category
+        if promotion_code is not None:
+            args["promotionCode"] = promotion_code
+        if in_stock is not None:
+            args["inStock"] = in_stock
+        if must_have_promotion is not None:
+            args["mustHavePromotion"] = must_have_promotion
+        if product_set is not None:
+            args["set"] = product_set
         if limit is not None:
             args["limit"] = limit
-            args["pageSize"] = limit
+        if offset is not None:
+            args["offset"] = offset
+        if sort_by is not None:
+            args["sortBy"] = sort_by
+        if sort_direction is not None:
+            args["sortDirection"] = sort_direction
+        if from_price is not None:
+            args["fromPrice"] = from_price
+        if to_price is not None:
+            args["toPrice"] = to_price
         payload = await self.call_tool(SilpoTool.GET_PRODUCTS, args)
+        if isinstance(payload, dict) and isinstance(payload.get("products"), list):
+            items = payload["products"]
+            meta = payload.get("meta")
+            total = meta.get("total") if isinstance(meta, dict) else None
+            payload = {
+                "items": items,
+                "total": total if total is not None else len(items),
+                "page": 1,
+                "pageSize": len(items),
+                "hasMore": False,
+            }
         return self._validate(payload, ProductSearchResult)
 
     async def get_product_details(
         self,
-        product_id: str | None = None,
-        slug: str | None = None,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
+        branch_id: str,
+        slug: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
     ) -> ProductDetail:
         """Full product card: composition, nutritional value, attributes."""
-        if product_id is None and slug is None:
-            raise ValueError("get_product_details requires product_id or slug")
-        args: dict[str, Any] = {}
-        if product_id is not None:
-            args["productId"] = product_id
-        if slug is not None:
-            args["slug"] = slug
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
-        payload = await self.call_tool(SilpoTool.GET_PRODUCT_DETAILS, args)
+        payload = await self.call_tool(
+            SilpoTool.GET_PRODUCT_DETAILS,
+            {
+                "branchId": branch_id,
+                "slug": slug,
+                "deliveryType": delivery_type,
+                "timeslotStart": timeslot_start,
+                "timeslotEnd": timeslot_end,
+            },
+        )
+        payload = self._unwrap_payload(payload, "product")
         return self._validate(payload, ProductDetail)
 
     async def get_similar_products(
         self,
+        branch_id: str,
         slug: str,
-        branch_id: str | None = None,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
         delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
     ) -> list[SilpoProduct]:
         """Similar/alternative products by slug."""
-        args: dict[str, Any] = {"slug": slug}
-        if branch_id is not None:
-            args["branchId"] = branch_id
+        args: dict[str, Any] = {"branchId": branch_id, "slug": slug}
+        if limit is not None:
+            args["limit"] = limit
+        if offset is not None:
+            args["offset"] = offset
         if delivery_type is not None:
             args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
         payload = await self.call_tool(SilpoTool.GET_SIMILAR_PRODUCTS, args)
+        payload = self._unwrap_payload(payload, "products")
         return self._validate(payload, SilpoProduct, many=True)
 
-    async def get_replacements(self, product_ids: list[str]) -> list[dict[str, Any]]:
+    async def get_replacements(
+        self,
+        branch_id: str,
+        company_id: str,
+        delivery_type: str,
+        product_ids: list[str],
+    ) -> list[dict[str, Any]]:
         """Replacements for out-of-stock products."""
-        payload = await self.call_tool(SilpoTool.GET_REPLACEMENTS, {"productIds": product_ids})
+        payload = await self.call_tool(
+            SilpoTool.GET_REPLACEMENTS,
+            {"branchId": branch_id, "companyId": company_id, "deliveryType": delivery_type, "productIds": product_ids},
+        )
+        payload = self._unwrap_payload(payload, "items")
         return cast(list[dict[str, Any]], payload)
 
-    async def get_favorites(self) -> list[SilpoProduct]:
+    async def get_favorites(self, branch_id: str, delivery_type: str, timeslot_start: str) -> list[SilpoProduct]:
         """List the guest's favorite products."""
-        payload = await self.call_tool(SilpoTool.GET_MY_FAVORITES, {})
+        payload = await self.call_tool(
+            SilpoTool.GET_MY_FAVORITES,
+            {"branchId": branch_id, "deliveryType": delivery_type, "timeslotStart": timeslot_start},
+        )
         return self._validate(payload, SilpoProduct, many=True)
 
-    async def update_favorites(self, product_ids: list[str], add: bool = True) -> dict[str, Any]:
-        """Add or remove products to/from favorites."""
-        payload = await self.call_tool(
-            SilpoTool.ADD_OR_UPDATE_FAVORITE_PRODUCTS, {"productIds": product_ids, "add": add}
-        )
+    async def update_favorites(self, actions: list[dict[str, Any]]) -> dict[str, Any]:
+        """Add or remove products to/from favorites.
+
+        ``actions`` entries need ``productId`` + ``externalProductId`` (both
+        from any product-returning tool) plus ``toDelete`` (true to remove).
+        """
+        payload = await self.call_tool(SilpoTool.ADD_OR_UPDATE_FAVORITE_PRODUCTS, {"actions": actions})
         return cast(dict[str, Any], payload)
 
     # -- Catalog (6) --------------------------------------------------------
 
     async def get_promotions(
         self,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
+        branch_id: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
     ) -> list[Promotion]:
         """Active promotions and discounts for a branch."""
-        args: dict[str, Any] = {}
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
-        payload = await self.call_tool(SilpoTool.GET_PROMOTIONS, args)
+        payload = await self.call_tool(
+            SilpoTool.GET_PROMOTIONS,
+            {
+                "branchId": branch_id,
+                "deliveryType": delivery_type,
+                "timeslotStart": timeslot_start,
+                "timeslotEnd": timeslot_end,
+            },
+        )
+        payload = self._unwrap_payload(payload, "promotions")
         return self._validate(payload, Promotion, many=True)
 
-    async def get_popular_categories(
-        self,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
-    ) -> list[Category]:
+    async def get_popular_categories(self, branch_id: str, delivery_type: str) -> list[Category]:
         """Popular categories in the branch."""
-        args: dict[str, Any] = {}
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
-        payload = await self.call_tool(SilpoTool.GET_POPULAR_CATEGORIES, args)
+        payload = await self.call_tool(
+            SilpoTool.GET_POPULAR_CATEGORIES, {"branchId": branch_id, "deliveryType": delivery_type}
+        )
+        payload = self._unwrap_payload(payload, "categories")
         return self._validate(payload, Category, many=True)
 
     async def get_category(
         self,
-        category_id: str | None = None,
-        category_slug: str | None = None,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
+        branch_id: str,
+        delivery_type: str,
+        category_slug: str,
     ) -> CategoryDetail:
         """Details of a category: subcategories, product count."""
-        if category_id is None and category_slug is None:
-            raise ValueError("get_category requires category_id or category_slug")
-        args: dict[str, Any] = {}
-        if category_id is not None:
-            args["categoryId"] = category_id
-        if category_slug is not None:
-            args["categorySlug"] = category_slug
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
-        payload = await self.call_tool(SilpoTool.GET_CATEGORY, args)
+        payload = await self.call_tool(
+            SilpoTool.GET_CATEGORY,
+            {"branchId": branch_id, "deliveryType": delivery_type, "categorySlug": category_slug},
+        )
         return self._validate(payload, CategoryDetail)
 
     async def get_categories(
         self,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
+        branch_id: str,
+        *,
+        parent_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Category]:
         """Flat list of all categories."""
-        args: dict[str, Any] = {}
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
+        args: dict[str, Any] = {"branchId": branch_id}
+        if parent_id is not None:
+            args["parentId"] = parent_id
+        if limit is not None:
+            args["limit"] = limit
+        if offset is not None:
+            args["offset"] = offset
         payload = await self.call_tool(SilpoTool.GET_CATEGORIES, args)
+        payload = self._unwrap_payload(payload, "categories")
         return self._validate(payload, Category, many=True)
 
     async def get_categories_tree(
         self,
-        branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
+        branch_id: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
     ) -> CategoriesTree:
         """Full category tree."""
-        args: dict[str, Any] = {}
-        if branch_id is not None:
-            args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
-        payload = await self.call_tool(SilpoTool.GET_CATEGORIES_TREE, args)
+        payload = await self.call_tool(
+            SilpoTool.GET_CATEGORIES_TREE,
+            {
+                "branchId": branch_id,
+                "deliveryType": delivery_type,
+                "timeslotStart": timeslot_start,
+                "timeslotEnd": timeslot_end,
+            },
+        )
+        if isinstance(payload, dict) and isinstance(payload.get("tree"), list):
+            payload = {"rootCategories": payload["tree"]}
         return self._validate(payload, CategoriesTree)
 
     async def get_product_sets(
         self,
-        branch_id: str | None = None,
+        branch_id: str,
+        *,
         delivery_type: str | None = None,
-        timeslot_start: str | None = None,
-        timeslot_end: str | None = None,
     ) -> list[ProductSet]:
         """Curated product sets."""
-        args: dict[str, Any] = {}
-        if branch_id is not None:
-            args["branchId"] = branch_id
+        args: dict[str, Any] = {"branchId": branch_id}
         if delivery_type is not None:
             args["deliveryType"] = delivery_type
-        if timeslot_start is not None:
-            args["timeslotStart"] = timeslot_start
-        if timeslot_end is not None:
-            args["timeslotEnd"] = timeslot_end
         payload = await self.call_tool(SilpoTool.GET_PRODUCT_SETS, args)
+        payload = self._unwrap_payload(payload, "sets")
         return self._validate(payload, ProductSet, many=True)
 
     # -- Cart (8) -----------------------------------------------------------
@@ -645,66 +698,73 @@ class SilpoClient:
 
     async def get_cart_by_id(self, cart_id: str) -> SilpoCart:
         """Return the full cart: items, delivery, slot, sums, validations."""
-        payload = await self.call_tool(
-            SilpoTool.GET_SHOPPING_CART_BY_ID, {"cartId": cart_id, "shoppingCartId": cart_id}
-        )
+        payload = await self.call_tool(SilpoTool.GET_SHOPPING_CART_BY_ID, {"shoppingCartId": cart_id})
+        payload = self._unwrap_payload(payload, "cart")
         return self._validate(payload, SilpoCart)
 
     async def add_or_update_cart_products(
         self,
         cart_id: str,
-        items: list[dict[str, Any]],
+        products: list[dict[str, Any]],
     ) -> CartUpdateResult:
         """Add products or update quantities in the cart.
 
-        ``items`` entries need ``productId`` + ``companyId`` + ``branchId``
+        ``products`` entries need ``productId`` + ``companyId`` + ``branchId``
         (as returned by product search) plus a ``quantity``.
         """
         payload = await self.call_tool(
-            SilpoTool.ADD_OR_UPDATE_CART_PRODUCTS, {"cartId": cart_id, "shoppingCartId": cart_id, "items": items}
+            SilpoTool.ADD_OR_UPDATE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": products}
         )
         return self._validate(payload, CartUpdateResult)
 
     async def remove_cart_products(self, cart_id: str, product_ids: list[str]) -> CartUpdateResult:
         """Remove specific products from the cart."""
+        products = [{"productId": pid} for pid in product_ids]
         payload = await self.call_tool(
-            SilpoTool.REMOVE_CART_PRODUCTS, {"cartId": cart_id, "shoppingCartId": cart_id, "productIds": product_ids}
+            SilpoTool.REMOVE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": products}
         )
         return self._validate(payload, CartUpdateResult)
 
     async def clear_cart(self, cart_id: str) -> CartUpdateResult:
         """Clear the entire cart."""
-        payload = await self.call_tool(SilpoTool.CLEAR_SHOPPING_CART, {"cartId": cart_id, "shoppingCartId": cart_id})
+        payload = await self.call_tool(SilpoTool.CLEAR_SHOPPING_CART, {"shoppingCartId": cart_id})
         return self._validate(payload, CartUpdateResult)
 
     async def update_shopping_cart(
         self,
         cart_id: str,
+        delivery_type: str,
+        timeslot: dict[str, Any],
+        address: dict[str, Any],
+        shipments: list[dict[str, Any]],
         *,
         branch_id: str | None = None,
-        delivery_type: str | None = None,
-        timeslot: str | None = None,
-        address: str | None = None,
         promo_code: str | None = None,
-        coupon_code: str | None = None,
         bonus_requested: float | None = None,
+        feedback_changes: str | None = None,
+        feedback_contacts: str | None = None,
+        is_adult_confirmed: bool | None = None,
     ) -> CartUpdateResult:
-        """Update delivery, slot, address, promo/coupon, or apply bonuses."""
-        args: dict[str, Any] = {"cartId": cart_id, "shoppingCartId": cart_id}
+        """Update delivery, slot, address, shipments, or apply bonuses."""
+        args: dict[str, Any] = {
+            "shoppingCartId": cart_id,
+            "deliveryType": delivery_type,
+            "timeslot": timeslot,
+            "address": address,
+            "shipments": shipments,
+        }
         if branch_id is not None:
             args["branchId"] = branch_id
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        if timeslot is not None:
-            args["timeslot"] = timeslot
-        if address is not None:
-            args["address"] = address
         if promo_code is not None:
             args["promoCode"] = promo_code
-        if coupon_code is not None:
-            args["couponCode"] = coupon_code
         if bonus_requested is not None:
             args["bonusRequested"] = bonus_requested
+        if feedback_changes is not None:
+            args["feedbackChanges"] = feedback_changes
+        if feedback_contacts is not None:
+            args["feedbackContacts"] = feedback_contacts
+        if is_adult_confirmed is not None:
+            args["isAdultConfirmed"] = is_adult_confirmed
         payload = await self.call_tool(SilpoTool.UPDATE_SHOPPING_CART, args)
         return self._validate(payload, CartUpdateResult)
 
@@ -712,20 +772,52 @@ class SilpoClient:
         """Add or remove gift certificates from the cart."""
         payload = await self.call_tool(
             SilpoTool.ADD_OR_UPDATE_CERTIFICATES,
-            {"cartId": cart_id, "shoppingCartId": cart_id, "certificateIds": certificate_ids},
+            {"shoppingCartId": cart_id, "certificatesToAdd": certificate_ids, "certificatesToRemove": []},
         )
         return self._validate(payload, CartUpdateResult)
 
     # -- Orders (2) ---------------------------------------------------------
 
-    async def get_online_orders(self) -> list[OnlineOrder]:
+    async def get_online_orders(self, limit: int | None = None, offset: int | None = None) -> list[OnlineOrder]:
         """History of online orders."""
-        payload = await self.call_tool(SilpoTool.GET_MY_ONLINE_ORDERS, {})
+        args: dict[str, Any] = {}
+        if limit is not None:
+            args["limit"] = limit
+        if offset is not None:
+            args["offset"] = offset
+        payload = await self.call_tool(SilpoTool.GET_MY_ONLINE_ORDERS, args)
+        payload = self._unwrap_payload(payload, "orders")
         return self._validate(payload, OnlineOrder, many=True)
 
-    async def get_offline_orders(self) -> list[OfflineReceipt]:
+    async def get_offline_orders(
+        self,
+        branch_id: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        date_start: str | None = None,
+        date_end: str | None = None,
+    ) -> list[OfflineReceipt]:
         """History of physical-store purchases (receipts)."""
-        payload = await self.call_tool(SilpoTool.GET_MY_OFFLINE_ORDERS, {})
+        args: dict[str, Any] = {
+            "branchId": branch_id,
+            "deliveryType": delivery_type,
+            "timeslotStart": timeslot_start,
+            "timeslotEnd": timeslot_end,
+        }
+        if limit is not None:
+            args["limit"] = limit
+        if offset is not None:
+            args["offset"] = offset
+        if date_start is not None:
+            args["dateStart"] = date_start
+        if date_end is not None:
+            args["dateEnd"] = date_end
+        payload = await self.call_tool(SilpoTool.GET_MY_OFFLINE_ORDERS, args)
+        payload = self._unwrap_payload(payload, "orders")
         return self._validate(payload, OfflineReceipt, many=True)
 
     # -- Profile (4) --------------------------------------------------------
@@ -733,16 +825,19 @@ class SilpoClient:
     async def get_profile(self) -> Profile:
         """Profile data: name, phone, email, birth date."""
         payload = await self.call_tool(SilpoTool.GET_MY_PROFILE, {})
+        payload = self._unwrap_payload(payload, "profile")
         return self._validate(payload, Profile)
 
     async def get_delivery_addresses(self) -> list[DeliveryAddress]:
         """Saved delivery addresses."""
         payload = await self.call_tool(SilpoTool.GET_MY_DELIVERY_ADDRESSES, {})
+        payload = self._unwrap_payload(payload, "addresses")
         return self._validate(payload, DeliveryAddress, many=True)
 
     async def get_family(self) -> list[FamilyMember]:
         """Family members in the profile."""
         payload = await self.call_tool(SilpoTool.GET_MY_FAMILY, {})
+        payload = self._unwrap_payload(payload, "members")
         return self._validate(payload, FamilyMember, many=True)
 
     async def get_food_restrictions(self) -> FoodRestrictions:
@@ -755,31 +850,37 @@ class SilpoClient:
     async def get_loyalty_info(self) -> LoyaltyInfo:
         """Vlasnyi Rakunok loyalty card info."""
         payload = await self.call_tool(SilpoTool.GET_LOYALTY_INFO, {})
+        payload = self._unwrap_payload(payload, "loyalty")
         return self._validate(payload, LoyaltyInfo)
 
     async def get_coupons(self) -> list[Coupon]:
         """Available discount coupons."""
         payload = await self.call_tool(SilpoTool.GET_MY_COUPONS, {})
+        payload = self._unwrap_payload(payload, "coupons")
         return self._validate(payload, Coupon, many=True)
 
-    async def get_coupon_details(self, coupon_id: str) -> CouponDetail:
+    async def get_coupon_details(self, business_coupon_id: int | str) -> CouponDetail:
         """Full coupon info: conditions, products, barcode."""
-        payload = await self.call_tool(SilpoTool.GET_COUPON_DETAILS, {"couponId": coupon_id})
+        payload = await self.call_tool(SilpoTool.GET_COUPON_DETAILS, {"businessCouponId": business_coupon_id})
+        payload = self._unwrap_payload(payload, "coupon")
         return self._validate(payload, CouponDetail)
 
     async def get_promos(self) -> list[Promo]:
         """Personal promo offers."""
         payload = await self.call_tool(SilpoTool.GET_MY_PROMOS, {})
+        payload = self._unwrap_payload(payload, "promos")
         return self._validate(payload, Promo, many=True)
 
     async def get_promo_codes(self) -> list[PromoCode]:
         """Active promo codes."""
         payload = await self.call_tool(SilpoTool.GET_PROMO_CODES, {})
+        payload = self._unwrap_payload(payload, "promoCodes")
         return self._validate(payload, PromoCode, many=True)
 
     async def get_certificates(self) -> list[Certificate]:
         """Active gift certificates."""
         payload = await self.call_tool(SilpoTool.GET_MY_CERTIFICATES, {})
+        payload = self._unwrap_payload(payload, "certificates")
         return self._validate(payload, Certificate, many=True)
 
     async def get_premium_subscription(self) -> PremiumSubscription:

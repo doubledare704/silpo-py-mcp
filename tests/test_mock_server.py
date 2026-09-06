@@ -21,12 +21,18 @@ async def test_mock_exposes_all_40_documented_tools(mock_server: SilpoMockServer
 async def test_mock_get_products_filters(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
-        result = await client.call_tool("silpo_get_products", {"query": "молоко"})
-        assert result.data["total"] == 1
+        ctx = {
+            "branchId": "bran-1",
+            "deliveryType": "DeliveryHome",
+            "timeslotStart": "2026-09-06T10:00:00+03:00",
+            "timeslotEnd": "2026-09-06T11:00:00+03:00",
+        }
+        result = await client.call_tool("silpo_get_products", {**ctx, "category": "Молочні продукти"})
+        assert result.data["total"] == 2
         assert result.data["items"][0]["productId"] == "prd-milk-2pct"
 
-        on_sale = await client.call_tool("silpo_get_products", {"onSale": True})
-        assert on_sale.data["total"] == 2
+        in_stock = await client.call_tool("silpo_get_products", {**ctx, "inStock": True})
+        assert in_stock.data["total"] == 4
 
 
 async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
@@ -38,18 +44,18 @@ async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
         add = await client.call_tool(
             "silpo_add_or_update_cart_products",
             {
-                "cartId": cart_id,
-                "items": [{"productId": "prd-milk-2pct", "quantity": 2}],
+                "shoppingCartId": cart_id,
+                "products": [{"productId": "prd-milk-2pct", "quantity": 2}],
             },
         )
         assert add.data["cart"]["totals"]["totalPrice"] == 2 * 36.9
 
         remove = await client.call_tool(
-            "silpo_remove_cart_products", {"cartId": cart_id, "productIds": ["prd-milk-2pct"]}
+            "silpo_remove_cart_products", {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct"}]}
         )
         assert remove.data["cart"]["items"] == []
 
-        clear = await client.call_tool("silpo_clear_shopping_cart", {"cartId": cart_id})
+        clear = await client.call_tool("silpo_clear_shopping_cart", {"shoppingCartId": cart_id})
         assert clear.data["cart"]["totals"]["totalPrice"] == 0.0
 
 
@@ -61,11 +67,21 @@ async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:
         await client.call_tool(
             "silpo_add_or_update_cart_products",
             {
-                "cartId": cart_id,
-                "items": [{"productId": "prd-cheese", "quantity": 1}],
+                "shoppingCartId": cart_id,
+                "products": [{"productId": "prd-cheese", "quantity": 1}],
             },
         )
-        updated = await client.call_tool("silpo_update_shopping_cart", {"cartId": cart_id, "bonusRequested": 50.0})
+        updated = await client.call_tool(
+            "silpo_update_shopping_cart",
+            {
+                "shoppingCartId": cart_id,
+                "deliveryType": "DeliveryHome",
+                "timeslot": {"start": "2026-09-06T10:00:00+03:00", "end": "2026-09-06T11:00:00+03:00"},
+                "address": {"address": "Київ, вул. Анни Ахматової, 9"},
+                "shipments": [],
+                "bonusRequested": 50.0,
+            },
+        )
         assert updated.data["cart"]["loyalty"]["bonusApplied"] == 50.0
         assert updated.data["cart"]["totals"]["totalPrice"] == 89.0 - 50.0
 

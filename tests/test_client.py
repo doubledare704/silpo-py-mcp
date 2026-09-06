@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from silpo_py_mcp import SilpoClient
 from silpo_py_mcp.models import (
     Address,
@@ -17,6 +20,9 @@ from silpo_py_mcp.models import (
     SilpoProduct,
     TimeSlot,
 )
+
+TS = "2026-09-06T10:00:00+03:00"
+TE = "2026-09-06T11:00:00+03:00"
 
 
 async def test_list_tools(client: SilpoClient) -> None:
@@ -36,7 +42,7 @@ async def test_location_group(client: SilpoClient) -> None:
     branches = await client.list_branches(has_pickup=True)
     assert len(branches) == 2
 
-    slots: list[TimeSlot] = await client.get_time_slots("bran-1", "DeliveryHome")
+    slots: list[TimeSlot] = await client.get_time_slots("bran-1", delivery_types=["DeliveryHome"])
     assert len(slots) == 3
     assert slots[0].is_express
 
@@ -48,41 +54,81 @@ async def test_location_group(client: SilpoClient) -> None:
 
 
 async def test_product_search_group(client: SilpoClient) -> None:
-    result: ProductSearchResult = await client.get_products(query="молоко")
-    assert result.total == 1
+    result: ProductSearchResult = await client.get_products(
+        "bran-1", "DeliveryHome", TS, TE, category="Молочні продукти"
+    )
+    assert result.total == 2
     assert isinstance(result.items[0], SilpoProduct)
     assert result.items[0].is_private_label
 
-    batch: BatchProductResult = await client.find_products_batch(["молоко", "сир", "nonexistent"])
+    batch: BatchProductResult = await client.find_products_batch(
+        "bran-1", "DeliveryHome", TS, TE, ["молоко", "сир", "nonexistent"]
+    )
     assert "молоко" in batch.results
     assert "nonexistent" in batch.unmatched
 
-    details = await client.get_product_details("prd-milk-2pct")
+    details = await client.get_product_details("bran-1", "moloko-premiya-25-900-ml", "DeliveryHome", TS, TE)
     assert details.composition
 
-    similar = await client.get_similar_products("moloko-premiya-25-900-ml")
+    similar = await client.get_similar_products("bran-1", "moloko-premiya-25-900-ml")
     assert len(similar) == 2
 
-    await client.update_favorites(["prd-bread"], add=True)
-    favorites = await client.get_favorites()
+    await client.update_favorites([{"productId": "prd-bread", "externalProductId": 0, "toDelete": False}])
+    favorites = await client.get_favorites("bran-1", "DeliveryHome", TS)
     assert [p.product_id for p in favorites] == ["prd-bread"]
 
 
 async def test_catalog_group(client: SilpoClient) -> None:
-    promotions = await client.get_promotions()
+    promotions = await client.get_promotions("bran-1", "DeliveryHome", TS, TE)
     assert len(promotions) == 2
 
-    categories: list[Category] = await client.get_categories()
+    categories: list[Category] = await client.get_categories("bran-1")
     assert len(categories) == 4
 
-    tree = await client.get_categories_tree()
+    tree = await client.get_categories_tree("bran-1", "DeliveryHome", TS, TE)
     assert len(tree.root_categories) == 3
 
-    popular = await client.get_popular_categories()
+    popular = await client.get_popular_categories("bran-1", "DeliveryHome")
     assert len(popular) == 3
 
-    sets = await client.get_product_sets()
+    sets = await client.get_product_sets("bran-1")
     assert sets[0].title == "Сніданок за 150 грн"
+
+
+async def test_cart_mutation_wire_args(client: SilpoClient) -> None:
+    """Cart mutations must send the live payload keys (shoppingCartId + products / certificatesTo*)."""
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append((str(name), dict(arguments)))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+
+    await client.add_or_update_cart_products(cart_id, [{"productId": "prd-milk-2pct", "quantity": 2}])
+    await client.remove_cart_products(cart_id, ["prd-milk-2pct"])
+    await client.add_or_update_certificates(cart_id, ["cert-1"])
+
+    by_name = {name: args for name, args in captured}
+    assert by_name["silpo_add_or_update_cart_products"] == {
+        "shoppingCartId": cart_id,
+        "products": [{"productId": "prd-milk-2pct", "quantity": 2}],
+    }
+    assert by_name["silpo_remove_cart_products"] == {
+        "shoppingCartId": cart_id,
+        "products": [{"productId": "prd-milk-2pct"}],
+    }
+    assert by_name["silpo_add_or_update_certificates"] == {
+        "shoppingCartId": cart_id,
+        "certificatesToAdd": ["cert-1"],
+        "certificatesToRemove": [],
+    }
 
 
 async def test_full_cart_workflow(client: SilpoClient) -> None:
@@ -109,10 +155,22 @@ async def test_full_cart_workflow(client: SilpoClient) -> None:
     assert fetched.checkout_web_link
 
     updated = await client.update_shopping_cart(
-        cart_id, bonus_requested=25.0, timeslot="slot-1", address="Київ, вул. Центральна"
+        cart_id,
+        "DeliveryHome",
+        {"start": TS, "end": TE},
+        {"address": "Київ, вул. Центральна"},
+        [
+            {
+                "branchId": "bran-1",
+                "companyId": "co-1",
+                "deliveryType": "DeliveryHome",
+                "timeslot": {"start": TS, "end": TE},
+            }
+        ],
+        bonus_requested=25.0,
     )
     assert updated.cart.loyalty.bonus_applied == 25.0
-    assert updated.cart.address == "Київ, вул. Центральна"
+    assert updated.cart.address == {"address": "Київ, вул. Центральна"}
 
     removed = await client.remove_cart_products(cart_id, ["prd-bread"])
     assert len(removed.cart.items) == 1
@@ -166,7 +224,7 @@ async def test_orders_profile_loyalty_groups(client: SilpoClient) -> None:
     online = await client.get_online_orders()
     assert online[0].status == "delivered"
 
-    offline = await client.get_offline_orders()
+    offline = await client.get_offline_orders("bran-1", "DeliveryHome", TS, TE)
     assert offline[0].branch_name
 
     profile = await client.get_profile()

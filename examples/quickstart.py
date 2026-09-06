@@ -33,7 +33,11 @@ async def main() -> None:
 
         # 3. Search products from a shopping list
         shopping_list = ["молоко", "хліб", "яйця"]
-        batch = await client.find_products_batch(shopping_list, limit=1)
+        timeslot_start = "2026-09-06T10:00:00+03:00"
+        timeslot_end = "2026-09-06T11:00:00+03:00"
+        batch = await client.find_products_batch(
+            "bran-1", "DeliveryHome", timeslot_start, timeslot_end, shopping_list, limit=1
+        )
         print(f"[search] matched: {list(batch.results.keys())}; unmatched: {batch.unmatched}")
 
         items = []
@@ -57,11 +61,25 @@ async def main() -> None:
         loyalty = updated.cart.loyalty
         if loyalty.bonus_available > 0 and loyalty.bonus_requested is None:
             print(f"[loyalty] {loyalty.bonus_available:.1f} балабонусів available — applying all.")
-            updated = await client.update_shopping_cart(cart.cart_id, bonus_requested=loyalty.bonus_available)
+            updated = await client.update_shopping_cart(
+                cart.cart_id,
+                updated.cart.delivery_type,
+                {"start": timeslot_start, "end": timeslot_end},
+                {"address": address.text},
+                [
+                    {
+                        "branchId": updated.cart.branch_id,
+                        "companyId": "co-1",
+                        "deliveryType": updated.cart.delivery_type,
+                        "timeslot": {"start": timeslot_start, "end": timeslot_end},
+                    }
+                ],
+                bonus_requested=loyalty.bonus_available,
+            )
             print(f"[cart] after bonuses — total {updated.cart.totals.total_price} UAH")
 
         # 6. Validate delivery slot and show checkout links
-        slots = await client.get_time_slots(updated.cart.branch_id, updated.cart.delivery_type)
+        slots = await client.get_time_slots(updated.cart.branch_id, delivery_types=[updated.cart.delivery_type])
         print(f"[slots] {len(slots)} available; first starts {slots[0].starts_at}")
         print(f"[checkout] web:  {updated.cart.checkout_web_link}")
         print(f"[checkout] mobile: {updated.cart.checkout_mobile_link}")

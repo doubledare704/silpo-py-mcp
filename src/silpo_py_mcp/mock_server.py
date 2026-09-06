@@ -330,23 +330,17 @@ class SilpoMockServer:
     # Location & delivery (6)
     def _register_location_tools(self) -> None:
         @self._fastmcp.tool
-        def silpo_find_address(
-            text: str | None = None,
-            address: str | None = None,
-        ) -> dict[str, Any]:
+        def silpo_find_address(address: str) -> dict[str, Any]:
             """Find coordinates (lat/lng) for an address string."""
-            _ = address or text
             return {"success": True, "summary": "Found 1 address", "addresses": FIXTURE_ADDRESSES[:1]}
 
         @self._fastmcp.tool
         def silpo_get_available_delivery_types(
-            lat: float | None = None,
-            lng: float | None = None,
-            latitude: float | None = None,
-            longitude: float | None = None,
+            latitude: float,
+            longitude: float,
         ) -> list[dict[str, Any]]:
             """Return available delivery types for coordinates."""
-            _ = (lat if lat is not None else latitude, lng if lng is not None else longitude)
+            _ = (latitude, longitude)
             return [
                 {
                     "type": "DeliveryHome",
@@ -364,19 +358,18 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_list_branches(
-            hasPickup: bool | None = None,
-            hasNovaPoshta: bool | None = None,
             limit: int | None = None,
-            page: int | None = None,
-            pageSize: int | None = None,
+            offset: int | None = None,
+            hasPickup: bool | None = None,
+            hasNP: bool | None = None,
         ) -> list[dict[str, Any]]:
             """List Silpo branches, optionally filtered."""
-            _ = (limit, page, pageSize)
+            _ = (limit, offset)
             result = list(BRANCHES)
             if hasPickup is not None:
                 result = [b for b in result if b["hasPickup"] == hasPickup]
-            if hasNovaPoshta is not None:
-                result = [b for b in result if b["hasNovaPoshta"] == hasNovaPoshta]
+            if hasNP is not None:
+                result = [b for b in result if b["hasNovaPoshta"] == hasNP]
             if limit is not None:
                 result = result[:limit]
             return result
@@ -384,7 +377,6 @@ class SilpoMockServer:
         @self._fastmcp.tool
         def silpo_get_time_slots(
             branchId: str,
-            deliveryType: str | None = None,
             deliveryTypes: list[str] | None = None,
             limit: int | None = None,
             start: str | None = None,
@@ -392,7 +384,7 @@ class SilpoMockServer:
         ) -> list[dict[str, Any]]:
             """Return available delivery time slots for a branch."""
             _ = (limit, start, end)
-            dtype = deliveryType or (deliveryTypes[0] if deliveryTypes else "DeliveryHome")
+            dtype = deliveryTypes[0] if deliveryTypes else "DeliveryHome"
             slots = [
                 {
                     "id": f"slot-{i}",
@@ -409,51 +401,36 @@ class SilpoMockServer:
             return slots
 
         @self._fastmcp.tool
-        def silpo_find_nova_poshta_settlements(
-            query: str | None = None,
-            settlementName: str | None = None,
-            title: str | None = None,
-        ) -> list[dict[str, Any]]:
+        def silpo_find_nova_poshta_settlements(title: str) -> list[dict[str, Any]]:
             """Find Nova Poshta settlements by name."""
-            q = (query or settlementName or title or "").lower()
+            q = title.lower()
             return [s for s in NOVA_POSHTA_SETTLEMENTS if q in s["name"].lower()]
 
         @self._fastmcp.tool
         def silpo_find_nova_poshta_offices(
-            settlementId: str | None = None,
-            settlement_id: str | None = None,
+            settlementId: str,
             title: str | None = None,
         ) -> list[dict[str, Any]]:
             """Find Nova Poshta offices/postomats in a settlement."""
-            _ = settlementId or settlement_id or title
+            _ = title
             return NOVA_POSHTA_OFFICES
 
     # Product search (7)
     def _register_search_tools(self) -> None:
         @self._fastmcp.tool
         def silpo_find_products_batch(
-            items: list[dict[str, Any]] | None = None,
-            queries: list[str] | None = None,
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
-            products: list[dict[str, Any]] | None = None,
+            branchId: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
+            products: list[str],
             limit: int | None = None,
         ) -> dict[str, Any]:
             """Search up to 30 products in parallel by list of shopping items."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit)
-            if items is None and products is not None:
-                items = products
-            if items is None and queries is not None:
-                items = [{"query": q, "limit": 1} for q in queries]
-            items = items or products or []
-            if items is None:
-                items = []
+            _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
             results: dict[str, Any] = {"results": {}, "unmatched": []}
-            for item in items:
-                query = item.get("query", "") or item.get("title", "") or item.get("product", "")
-                lim = item.get("limit", limit or 1)
+            for query in products:
+                lim = limit or 1
                 matches = [
                     p for p in PRODUCTS if query.lower() in p["title"].lower() or query.lower() in p["category"].lower()
                 ]
@@ -465,63 +442,41 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_products(
-            query: str | None = None,
-            categoryId: str | None = None,
-            onSale: bool | None = None,
-            page: int = 1,
-            pageSize: int = 20,
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
-            limit: int | None = None,
-            categorySlug: str | None = None,
-            category: str | None = None,
-            slug: str | None = None,
+            branchId: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
             mustHavePromotion: bool | None = None,
+            category: str | None = None,
             promotionCode: str | None = None,
             inStock: bool | None = None,
             set: str | None = None,
+            limit: int | None = None,
             offset: int | None = None,
             sortBy: str | None = None,
             sortDirection: str | None = None,
             fromPrice: float | None = None,
             toPrice: float | None = None,
         ) -> dict[str, Any]:
-            """Products with filters: category, promotion, search, pagination."""
-            _ = (
-                branchId,
-                deliveryType,
-                timeslotStart,
-                timeslotEnd,
-                slug,
-                category,
-                mustHavePromotion,
-                promotionCode,
-                inStock,
-                set,
-                offset,
-                sortBy,
-                sortDirection,
-                fromPrice,
-                toPrice,
-            )
-            if limit is not None:
-                pageSize = limit
-            if categorySlug is not None and categoryId is None:
-                cat_by_slug = next((c for c in CATEGORIES if c["slug"] == categorySlug), None)
-                if cat_by_slug:
-                    categoryId = cat_by_slug["id"]
+            """Products with filters: category, promotion, stock, pagination."""
+            _ = (deliveryType, timeslotStart, timeslotEnd, promotionCode, set, sortBy, sortDirection)
+            page = 1
+            pageSize = limit or 20
+            if offset is not None:
+                page = offset // pageSize + 1
             items = list(PRODUCTS)
-            if query:
-                q = query.lower()
-                items = [p for p in items if q in p["title"].lower() or q in p["category"].lower()]
-            if categoryId:
-                cat = next((c for c in CATEGORIES if c["id"] == categoryId), None)
+            if category:
+                cat = next((c for c in CATEGORIES if c["slug"] == category or c["title"] == category), None)
                 if cat:
                     items = [p for p in items if p["category"] == cat["title"]]
-            if onSale is not None:
-                items = [p for p in items if p["isOnSale"] == onSale]
+            if inStock is not None:
+                items = [p for p in items if p["isAvailable"] == inStock]
+            if mustHavePromotion is not None:
+                items = [p for p in items if p["isOnSale"] == mustHavePromotion]
+            if fromPrice is not None:
+                items = [p for p in items if p["price"] >= fromPrice]
+            if toPrice is not None:
+                items = [p for p in items if p["price"] <= toPrice]
             start = (page - 1) * pageSize
             return {
                 "items": items[start : start + pageSize],
@@ -533,22 +488,17 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_product_details(
-            productId: str | None = None,
-            slug: str | None = None,
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
+            branchId: str,
+            slug: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
         ) -> dict[str, Any]:
             """Full product card: composition, nutritional value, attributes."""
             _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
-            product: dict[str, Any] | None = None
-            if productId is not None:
-                product = self._find_product(productId)
-            elif slug is not None:
-                product = next((p for p in PRODUCTS if p["slug"] == slug), None)
+            product = next((p for p in PRODUCTS if p["slug"] == slug), None)
             if product is None:
-                raise ValueError(f"Product not found: {productId or slug}")
+                raise ValueError(f"Product not found: {slug}")
             return {
                 **product,
                 "description": "Опис товару (мок).",
@@ -559,18 +509,14 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_similar_products(
-            slug: str | None = None,
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
+            branchId: str,
+            slug: str,
             limit: int | None = None,
             offset: int | None = None,
+            deliveryType: str | None = None,
         ) -> list[dict[str, Any]]:
             """Similar/alternative products by slug."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit, offset)
-            if slug is None:
-                return []
+            _ = (branchId, deliveryType, limit, offset)
             source = next((p for p in PRODUCTS if p["slug"] == slug), None)
             if source is None:
                 return []
@@ -581,14 +527,13 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_replacements(
-            productIds: list[str] | None = None,
-            branchId: str | None = None,
-            companyId: str | None = None,
-            deliveryType: str | None = None,
+            branchId: str,
+            companyId: str,
+            productIds: list[str],
+            deliveryType: str,
         ) -> list[dict[str, Any]]:
             """Replacements for out-of-stock products."""
             _ = (branchId, companyId, deliveryType)
-            productIds = productIds or []
             replacements = []
             for productId in productIds:
                 product = self._find_product(productId)
@@ -603,9 +548,9 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_my_favorites(
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
+            branchId: str,
+            deliveryType: str,
+            timeslotStart: str,
             limit: int | None = None,
             offset: int | None = None,
         ) -> list[dict[str, Any]]:
@@ -615,77 +560,56 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_add_or_update_favorite_products(
-            productIds: list[str] | None = None,
-            add: bool | None = None,
-            actions: list[dict[str, Any]] | None = None,
+            actions: list[dict[str, Any]],
         ) -> dict[str, Any]:
             """Add or remove products to/from favorites."""
-            if actions is not None:
-                for act in actions:
-                    pid = act.get("productId") or act.get("product_id") or act.get("id")
-                    op = act.get("action") or act.get("type") or ("add" if add is not False else "remove")
-                    if pid is None:
-                        continue
-                    if op in ("add", "create", True):
-                        if pid not in self._favorites:
-                            self._favorites.append(pid)
-                    else:
-                        if pid in self._favorites:
-                            self._favorites.remove(pid)
-                return {"productIds": self._favorites}
-            productIds = productIds or []
-            do_add = True if add is None else add
-            for pid in productIds:
-                if do_add and pid not in self._favorites:
-                    self._favorites.append(pid)
-                elif not do_add and pid in self._favorites:
-                    self._favorites.remove(pid)
+            for act in actions:
+                pid = act.get("productId")
+                to_delete = act.get("toDelete", False)
+                if pid is None:
+                    continue
+                if not to_delete:
+                    if pid not in self._favorites:
+                        self._favorites.append(pid)
+                else:
+                    if pid in self._favorites:
+                        self._favorites.remove(pid)
             return {"productIds": self._favorites}
 
     # Catalog (6)
     def _register_catalog_tools(self) -> None:
         @self._fastmcp.tool
         def silpo_get_promotions(
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
-            limit: int | None = None,
-            categorySlug: str | None = None,
+            branchId: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
         ) -> list[dict[str, Any]]:
             """Active promotions and discounts."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit, categorySlug)
+            _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
             return PROMOTIONS
 
         @self._fastmcp.tool
         def silpo_get_popular_categories(
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
-            limit: int | None = None,
+            branchId: str,
+            deliveryType: str,
         ) -> list[dict[str, Any]]:
             """Popular categories in the branch."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit)
+            _ = (branchId, deliveryType)
             return CATEGORIES[:3]
 
         @self._fastmcp.tool
         def silpo_get_category(
-            categoryId: str | None = None,
-            categorySlug: str | None = None,
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
+            branchId: str,
+            deliveryType: str,
+            categorySlug: str,
         ) -> dict[str, Any]:
             """Details of a category: subcategories, product count."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
-            cid = categoryId
-            if cid is None and categorySlug is not None:
-                cat_by_slug = next((c for c in CATEGORIES if c["slug"] == categorySlug), None)
-                cid = cat_by_slug["id"] if cat_by_slug else None
+            _ = (branchId, deliveryType)
+            cat_by_slug = next((c for c in CATEGORIES if c["slug"] == categorySlug), None)
+            cid = cat_by_slug["id"] if cat_by_slug else None
             if cid is None:
-                raise ValueError(f"Category not found: {categoryId or categorySlug}")
+                raise ValueError(f"Category not found: {categorySlug}")
             category = next((c for c in CATEGORIES if c["id"] == cid), None)
             if category is None:
                 raise ValueError(f"Category not found: {cid}")
@@ -694,26 +618,21 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_categories(
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
-            limit: int | None = None,
-            pageSize: int | None = None,
-            categorySlug: str | None = None,
+            branchId: str,
             parentId: str | None = None,
+            limit: int | None = None,
             offset: int | None = None,
         ) -> list[dict[str, Any]]:
             """Flat list of all categories."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit, pageSize, categorySlug, parentId, offset)
+            _ = (parentId, limit, offset)
             return CATEGORIES
 
         @self._fastmcp.tool
         def silpo_get_categories_tree(
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
+            branchId: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
         ) -> dict[str, Any]:
             """Full category tree."""
             _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
@@ -725,14 +644,11 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_product_sets(
-            branchId: str | None = None,
+            branchId: str,
             deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
-            limit: int | None = None,
         ) -> list[dict[str, Any]]:
             """Curated product sets."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit)
+            _ = (branchId, deliveryType)
             return PRODUCT_SETS
 
     # Cart (8)
@@ -750,9 +666,7 @@ class SilpoMockServer:
             longitude: float | str,
             deliveryType: str,
             branchId: str,
-            timeslot: dict[str, Any] | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
+            timeslot: dict[str, Any],
             city: str | None = None,
             street: str | None = None,
             house: str | None = None,
@@ -769,8 +683,6 @@ class SilpoMockServer:
                         "shoppingCartId": existing_id,
                     }
             slot = timeslot
-            if slot is None and (timeslotStart is not None or timeslotEnd is not None):
-                slot = {"start": timeslotStart, "end": timeslotEnd}
             cart_id = f"cart-{uuid.uuid4().hex[:8]}"
             self._carts[cart_id] = {
                 "cartId": cart_id,
@@ -824,18 +736,15 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_add_or_update_cart_products(
-            cartId: str | None = None,
-            shoppingCartId: str | None = None,
-            items: list[dict[str, Any]] | None = None,
-            products: list[dict[str, Any]] | None = None,
+            shoppingCartId: str,
+            products: list[dict[str, Any]],
         ) -> dict[str, Any]:
             """Add products or update quantities in the cart."""
-            cid = cartId or shoppingCartId
-            if cid is None or cid not in self._carts:
+            cid = shoppingCartId
+            if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
             cart = self._carts[cid]
-            items = items or products or []
-            for incoming in items:
+            for incoming in products:
                 product = self._find_product(incoming["productId"])
                 if product is None:
                     raise ValueError(f"Product not found: {incoming['productId']}")
@@ -859,22 +768,16 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_remove_cart_products(
-            cartId: str | None = None,
-            shoppingCartId: str | None = None,
-            productIds: list[str] | None = None,
-            products: list[dict[str, Any]] | None = None,
+            shoppingCartId: str,
+            products: list[dict[str, Any]],
         ) -> dict[str, Any]:
             """Remove specific products from the cart."""
-            cid = cartId or shoppingCartId
-            if cid is None or cid not in self._carts:
+            cid = shoppingCartId
+            if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
             cart = self._carts[cid]
-            if products is not None:
-                productIds = [
-                    str(p.get("productId") or p.get("id")) for p in products if p.get("productId") or p.get("id")
-                ]
-            productIds = productIds or []  # type: ignore[assignment]
-            cart["items"] = [i for i in cart["items"] if i["productId"] not in productIds]
+            ids = {str(p.get("productId") or p.get("id")) for p in products if p.get("productId") or p.get("id")}
+            cart["items"] = [i for i in cart["items"] if i["productId"] not in ids]
             self._recompute_totals(cart)
             return {"cart": cart, "changed": True}
 
@@ -896,38 +799,32 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_update_shopping_cart(
-            cartId: str | None = None,
-            shoppingCartId: str | None = None,
+            shoppingCartId: str,
+            deliveryType: str,
+            timeslot: dict[str, Any],
+            address: dict[str, Any],
+            shipments: list[dict[str, Any]],
             branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslot: dict[str, Any] | str | None = None,
-            address: dict[str, Any] | str | None = None,
-            promoCode: str | None = None,
-            couponCode: str | None = None,
-            bonusRequested: float | None = None,
-            shipments: list[dict[str, Any]] | None = None,
             feedbackChanges: str | None = None,
             feedbackContacts: str | None = None,
             isAdultConfirmed: bool | None = None,
+            promoCode: str | None = None,
+            bonusRequested: float | None = None,
         ) -> dict[str, Any]:
-            """Update delivery, slot, address, promo/coupon, or apply bonuses."""
-            _ = (shipments, feedbackChanges, feedbackContacts, isAdultConfirmed)
-            cid = cartId or shoppingCartId
-            if cid is None or cid not in self._carts:
+            """Update delivery, slot, address, shipments, or apply bonuses."""
+            cid = shoppingCartId
+            if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
             cart = self._carts[cid]
+            cart["deliveryType"] = deliveryType
+            cart["timeslot"] = timeslot
+            cart["address"] = address
+            cart["shipments"] = shipments
             if branchId is not None:
                 cart["branchId"] = branchId
-            if deliveryType is not None:
-                cart["deliveryType"] = deliveryType
-            if timeslot is not None:
-                cart["timeslot"] = timeslot
-            if address is not None:
-                cart["address"] = address
             if promoCode is not None:
                 cart["promoCode"] = promoCode
-            if couponCode is not None:
-                cart["couponCode"] = couponCode
+            _ = (feedbackChanges, feedbackContacts, isAdultConfirmed)
             if bonusRequested is not None:
                 available = cart["loyalty"].get("bonusAvailable", 0.0)
                 cart["loyalty"]["bonusRequested"] = min(bonusRequested, available)
@@ -937,20 +834,17 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_add_or_update_certificates(
-            cartId: str | None = None,
-            shoppingCartId: str | None = None,
-            certificateIds: list[str] | None = None,
-            certificatesToAdd: list[str] | None = None,
-            certificatesToRemove: list[str] | None = None,
+            shoppingCartId: str,
+            certificatesToAdd: list[str],
+            certificatesToRemove: list[str],
         ) -> dict[str, Any]:
             """Add or remove gift certificates from the cart."""
-            _ = (certificatesToAdd, certificatesToRemove)
-            cid = cartId or shoppingCartId
-            if cid is None or cid not in self._carts:
+            cid = shoppingCartId
+            if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
             cart = self._carts[cid]
-            ids = certificateIds or certificatesToAdd or []
-            cart["certificates"] = ids
+            _ = certificatesToRemove
+            cart["certificates"] = certificatesToAdd
             return {"cart": cart, "changed": True}
 
     # Orders (2)
@@ -983,10 +877,10 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_my_offline_orders(
-            branchId: str | None = None,
-            deliveryType: str | None = None,
-            timeslotStart: str | None = None,
-            timeslotEnd: str | None = None,
+            branchId: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
             limit: int | None = None,
             offset: int | None = None,
             dateStart: str | None = None,
@@ -1056,12 +950,8 @@ class SilpoMockServer:
             }
 
         @self._fastmcp.tool
-        def silpo_get_my_coupons(
-            limit: int | None = None,
-            offset: int | None = None,
-        ) -> list[dict[str, Any]]:
+        def silpo_get_my_coupons() -> list[dict[str, Any]]:
             """Available discount coupons."""
-            _ = (limit, offset)
             return [
                 {
                     "couponId": "cup-1",
@@ -1074,17 +964,9 @@ class SilpoMockServer:
             ]
 
         @self._fastmcp.tool
-        def silpo_get_coupon_details(
-            couponId: str | None = None,
-            businessCouponId: int | str | None = None,
-        ) -> dict[str, Any]:
+        def silpo_get_coupon_details(businessCouponId: int | str) -> dict[str, Any]:
             """Full coupon info: conditions, products, barcode."""
-            cid = str(businessCouponId) if businessCouponId is not None else couponId
-            if cid not in ("cup-1", "1", 1):
-                # allow numeric businessCouponId from live
-                if cid != "cup-1":
-                    # still return mock for any live id to keep smoke green
-                    pass
+            _ = str(businessCouponId)  # mock returns the fixture coupon for any id
             return {
                 "couponId": "cup-1",
                 "businessCouponId": 1,

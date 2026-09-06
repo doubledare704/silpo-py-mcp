@@ -85,8 +85,9 @@ Key design decisions:
    `SilpoClient.for_real_server()` (Streamable HTTP + OAuth). Tests always run
    against the mock so the suite needs no network or Silpo credentials.
 3. **Mock arg names must match the real API.** If you add a mock tool or change
-   arguments, keep them camelCase and consistent with the docs, and update
-   `SilpoTool` in `src/silpo_py_mcp/tools.py` (single source; `EXPECTED_TOOLS` derives from it).
+   arguments, keep them camelCase and consistent with the live `tools/list`
+   schemas (dump them with `examples/real_smoke.py`), and update `SilpoTool`
+   in `src/silpo_py_mcp/tools.py` (single source; `EXPECTED_TOOLS` derives from it).
 4. **Token security.** OAuth tokens are stored encrypted at rest (Fernet) under
    `~/.silpo_py_mcp` by default. Never log tokens; keep them server-side.
 
@@ -114,14 +115,23 @@ Key design decisions:
   (`client_secret_basic`) and the `mcp` library then sends both a Basic header
   and `client_id` in the body, which the server rejects with "Client must not
   use multiple authentication methods".
-- **The real `tools/list` schemas differ from the docs the mock is built on.**
-  Verified live (Aug 2026): `silpo_get_products` takes
-  `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` (+ filters),
-  `silpo_find_address` takes `address`, `silpo_get_available_delivery_types`
-  takes `latitude`/`longitude`, `silpo_get_category` takes `categorySlug`,
-  cart tools take `shoppingCartId`. Typed methods still target the documented
-  names — use `call_tool` (or `examples/real_smoke.py`) for live calls until
-  the mock and typed methods are reconciled.
+- **All 40 tools are reconciled to the live `tools/list` schemas** (verified
+  live, Sep 2026). The mock exposes exactly the live argument names and the
+  typed methods send exactly the live payloads. Context args
+  (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
+  the live schema requires them; cart tools take `shoppingCartId`;
+  `silpo_add_or_update_cart_products` takes `products`;
+  `silpo_find_products_batch` takes `products` as a list of strings;
+  `silpo_add_or_update_favorite_products` takes `actions`
+  (`[{productId, externalProductId, toDelete}]`). Use `examples/real_smoke.py`
+  to re-dump the live schemas after server updates.
+- **Response shapes are reconciled too** (verified live, Sep 2026). Every live
+  response is wrapped in `{success, summary, <data>, meta?}`; the typed
+  methods unwrap it via `_unwrap_payload`. Models accept both the live field
+  names (`id`/`name`/`start`/`end`/`deliveryType`/`available`) and the
+  documented/mock ones via `AliasChoices`, so the mock's documented fixtures
+  keep validating. `find_products_batch` (`queries` → `results`) and
+  `get_products` (`products` + `meta.total`) are normalized client-side.
 - Real tool responses come back as FastMCP `Root` dataclasses; `_extract_payload`
   unwraps them via `dataclasses.asdict` so `call_tool` returns plain JSON.
 - Server quirks observed live: `silpo_get_category` declares an output schema

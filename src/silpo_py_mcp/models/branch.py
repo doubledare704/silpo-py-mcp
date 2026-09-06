@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 
 from silpo_py_mcp.models.base import SilpoModel
 
@@ -51,7 +52,7 @@ class DeliveryType(StrEnum):
 class AvailableDeliveryType(SilpoModel):
     """A delivery option for a given coordinate."""
 
-    type: DeliveryType
+    type: DeliveryType = Field(validation_alias=AliasChoices("type", "deliveryType"))
     branch_id: str | None = Field(default=None, alias="branchId")
     description: str | None = None
     min_order: float | None = Field(default=None, alias="minOrder")
@@ -116,29 +117,37 @@ class Branch(SilpoModel):
 class TimeSlot(SilpoModel):
     """A delivery time slot."""
 
-    id: str
+    id: str = ""
     delivery_type: DeliveryType = Field(alias="deliveryType")
-    branch_id: str = Field(alias="branchId")
-    starts_at: str = Field(alias="startsAt")
-    ends_at: str = Field(alias="endsAt")
+    branch_id: str = Field(default="", alias="branchId")
+    starts_at: str = Field(validation_alias=AliasChoices("startsAt", "start"))
+    ends_at: str = Field(validation_alias=AliasChoices("endsAt", "end"))
     price: float = 0.0
-    is_available: bool = Field(default=True, alias="isAvailable")
+    is_available: bool = Field(default=True, validation_alias=AliasChoices("isAvailable", "available"))
     is_express: bool = Field(default=False, alias="isExpress")
+    delivery_cost: float | None = Field(default=None, alias="deliveryCost")
+    min_order_cost: float | None = Field(default=None, alias="minOrderCost")
+    max_weight: float | None = Field(default=None, alias="maxWeight")
+    constraints: dict[str, Any] | None = None
+    fast: bool | None = None
 
 
 class NovaPoshtaSettlement(SilpoModel):
     """A Nova Poshta settlement (city/town)."""
 
-    settlement_id: str = Field(alias="settlementId")
-    name: str
+    settlement_id: str = Field(validation_alias=AliasChoices("settlementId", "id"))
+    name: str = Field(validation_alias=AliasChoices("name", "title"))
     region: str | None = None
+    area: str | None = None
 
 
 class NovaPoshtaOffice(SilpoModel):
     """A Nova Poshta office or parcel machine."""
 
-    office_id: str = Field(alias="officeId")
-    name: str
+    office_id: str = Field(validation_alias=AliasChoices("officeId", "id"))
+    name: str = Field(validation_alias=AliasChoices("name", "title"))
     address: str | None = None
     type: str | None = Field(default=None, description="office | postomat")
     coordinates: GeoPoint | None = None
+    number: float | None = None
+    status: str | None = None

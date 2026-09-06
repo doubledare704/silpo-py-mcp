@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from silpo_py_mcp.models.base import SilpoModel
 
@@ -12,20 +12,24 @@ from silpo_py_mcp.models.base import SilpoModel
 class SilpoProduct(SilpoModel):
     """A product as returned by product search tools."""
 
-    product_id: str = Field(alias="productId", description="Silpo product identifier.")
+    product_id: str = Field(validation_alias=AliasChoices("productId", "id"), description="Silpo product identifier.")
     company_id: str = Field(alias="companyId", description="Company (supplier) identifier.")
     branch_id: str = Field(alias="branchId", description="Branch/store identifier.")
-    title: str
+    title: str = Field(validation_alias=AliasChoices("title", "name"))
     slug: str | None = None
     brand: str | None = None
     price: float
     old_price: float | None = Field(default=None, alias="oldPrice")
     is_on_sale: bool = Field(default=False, alias="isOnSale")
     is_private_label: bool = Field(default=False, alias="isPrivateLabel", description="ВТМ (Премія / Повна Чаша).")
-    is_available: bool = Field(default=True, alias="isAvailable")
+    is_available: bool = Field(default=True, validation_alias=AliasChoices("isAvailable", "available"))
     category: str | None = None
-    image_url: str | None = Field(default=None, alias="imageUrl")
+    image_url: str | None = Field(default=None, validation_alias=AliasChoices("imageUrl", "image"))
     unit: str | None = None
+    stock: float | None = None
+    weighted: bool | None = None
+    step: float | None = None
+    external_product_id: int | None = Field(default=None, alias="externalProductId")
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -71,7 +75,8 @@ class BatchProductResult(SilpoModel):
 class ProductSet(SilpoModel):
     """A curated selection of products (thematic, seasonal)."""
 
-    id: str
+    id: str = Field(validation_alias=AliasChoices("id", "slug"))
     title: str
     description: str | None = None
     products: list[SilpoProduct] = Field(default_factory=list)
+    link: str | None = None

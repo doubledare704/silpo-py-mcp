@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from silpo_py_mcp.models.base import SilpoModel
 
@@ -21,6 +21,8 @@ class Category(SilpoModel):
 class CategoryNode(SilpoModel):
     """A category with its subcategories (used in the categories tree)."""
 
+    slug: str | None = None
+    total: int | None = None
     children: list[CategoryNode] = Field(default_factory=list)
 
 
@@ -40,9 +42,11 @@ class CategoryDetail(SilpoModel):
 class Promotion(SilpoModel):
     """An active promotion / discount."""
 
-    id: str
+    id: str = Field(validation_alias=AliasChoices("id", "code"))
     title: str
     description: str | None = None
+    product_count: int | None = Field(default=None, alias="productCount")
+    url: str | None = None
     discount_percent: float | None = Field(default=None, alias="discountPercent")
     price_from: float | None = Field(default=None, alias="priceFrom")
     price_to: float | None = Field(default=None, alias="priceTo")

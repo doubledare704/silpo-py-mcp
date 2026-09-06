@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from silpo_py_mcp.models.base import SilpoModel
 
@@ -13,20 +13,20 @@ class CartItem(SilpoModel):
     """A single product line in the cart."""
 
     product_id: str = Field(alias="productId")
-    company_id: str = Field(alias="companyId")
-    branch_id: str = Field(alias="branchId")
+    company_id: str = Field(default="", alias="companyId")
+    branch_id: str = Field(default="", alias="branchId")
     title: str
     quantity: float
-    unit_price: float = Field(alias="unitPrice")
-    total_price: float = Field(alias="totalPrice")
+    unit_price: float = Field(default=0.0, alias="unitPrice")
+    total_price: float = Field(default=0.0, alias="totalPrice")
     is_available: bool = Field(default=True, alias="isAvailable")
 
 
 class CartTotals(SilpoModel):
     """Monetary totals of the cart."""
 
-    total_price: float = Field(alias="totalPrice")
-    items_price: float = Field(alias="itemsPrice")
+    total_price: float = Field(default=0.0, alias="totalPrice")
+    items_price: float = Field(default=0.0, alias="itemsPrice")
     delivery_price: float = Field(default=0.0, alias="deliveryPrice")
     discount: float = Field(default=0.0)
     bonuses_to_apply: float = Field(default=0.0, alias="bonusesToApply")
@@ -53,13 +53,13 @@ class CartValidation(SilpoModel):
 class SilpoCart(SilpoModel):
     """The full shopping cart."""
 
-    cart_id: str = Field(alias="cartId")
-    branch_id: str = Field(alias="branchId")
-    delivery_type: str = Field(alias="deliveryType")
+    cart_id: str = Field(default="", validation_alias=AliasChoices("cartId", "id"))
+    branch_id: str = Field(default="", alias="branchId")
+    delivery_type: str = Field(default="", alias="deliveryType")
     timeslot: str | dict[str, Any] | None = None
     address: str | dict[str, Any] | None = None
     items: list[CartItem] = Field(default_factory=list)
-    totals: CartTotals
+    totals: CartTotals = Field(default_factory=CartTotals)
     loyalty: CartLoyalty = Field(default_factory=CartLoyalty)
     validations: list[CartValidation] = Field(default_factory=list)
     checkout_web_link: str | None = Field(default=None, alias="checkoutWebLink")
@@ -106,5 +106,9 @@ class CartLineInput(SilpoModel):
 class CartUpdateResult(SilpoModel):
     """Result of a cart mutation."""
 
-    cart: SilpoCart
+    cart: SilpoCart = Field(default_factory=SilpoCart)
     changed: bool = True
+    products: list[dict[str, Any]] | None = None
+    shopping_cart_id: str | None = Field(default=None, alias="shoppingCartId")
+    added: list[str] | None = None
+    removed: list[str] | None = None
