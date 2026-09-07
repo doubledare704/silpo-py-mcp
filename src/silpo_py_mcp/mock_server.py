@@ -724,15 +724,11 @@ class SilpoMockServer:
             }
 
         @self._fastmcp.tool
-        def silpo_get_shopping_cart_by_id(
-            cartId: str | None = None,
-            shoppingCartId: str | None = None,
-        ) -> dict[str, Any]:
+        def silpo_get_shopping_cart_by_id(shoppingCartId: str) -> dict[str, Any]:
             """Return the full cart: items, delivery, slot, sums, validations."""
-            cid = cartId or shoppingCartId
-            if cid is None or cid not in self._carts:
-                raise ValueError(f"Cart not found: {cid}")
-            return self._carts[cid]
+            if shoppingCartId not in self._carts:
+                raise ValueError(f"Cart not found: {shoppingCartId}")
+            return self._carts[shoppingCartId]
 
         @self._fastmcp.tool
         def silpo_add_or_update_cart_products(
@@ -782,15 +778,11 @@ class SilpoMockServer:
             return {"cart": cart, "changed": True}
 
         @self._fastmcp.tool
-        def silpo_clear_shopping_cart(
-            cartId: str | None = None,
-            shoppingCartId: str | None = None,
-        ) -> dict[str, Any]:
+        def silpo_clear_shopping_cart(shoppingCartId: str) -> dict[str, Any]:
             """Clear the entire cart."""
-            cid = cartId or shoppingCartId
-            if cid is None or cid not in self._carts:
-                raise ValueError(f"Cart not found: {cid}")
-            cart = self._carts[cid]
+            if shoppingCartId not in self._carts:
+                raise ValueError(f"Cart not found: {shoppingCartId}")
+            cart = self._carts[shoppingCartId]
             cart["items"] = list[dict[str, Any]]()
             cart["loyalty"]["bonusRequested"] = None
             cart["loyalty"]["bonusApplied"] = 0.0
@@ -835,16 +827,15 @@ class SilpoMockServer:
         @self._fastmcp.tool
         def silpo_add_or_update_certificates(
             shoppingCartId: str,
-            certificatesToAdd: list[str],
-            certificatesToRemove: list[str],
+            certificatesToAdd: list[str] | None = None,
+            certificatesToRemove: list[str] | None = None,
         ) -> dict[str, Any]:
             """Add or remove gift certificates from the cart."""
-            cid = shoppingCartId
-            if cid not in self._carts:
-                raise ValueError(f"Cart not found: {cid}")
-            cart = self._carts[cid]
+            if shoppingCartId not in self._carts:
+                raise ValueError(f"Cart not found: {shoppingCartId}")
+            cart = self._carts[shoppingCartId]
             _ = certificatesToRemove
-            cart["certificates"] = certificatesToAdd
+            cart["certificates"] = certificatesToAdd or []
             return {"cart": cart, "changed": True}
 
     # Orders (2)

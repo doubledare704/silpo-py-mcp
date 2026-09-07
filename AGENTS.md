@@ -116,7 +116,9 @@ Key design decisions:
   and `client_id` in the body, which the server rejects with "Client must not
   use multiple authentication methods".
 - **All 40 tools are reconciled to the live `tools/list` schemas** (verified
-  live, Sep 2026). The mock exposes exactly the live argument names and the
+  live, Sep 2026; re-verified Sep 7 2026 — no drift found except the mock's
+  legacy `cartId` alias on `silpo_get_shopping_cart_by_id` /
+  `silpo_clear_shopping_cart`, now removed so both take only `shoppingCartId`). The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
   the live schema requires them; cart tools take `shoppingCartId`;

@@ -89,12 +89,16 @@ asyncio.run(main())
 ```
 
 > **Note on typed methods vs the real server.** The typed methods and the mock
-> mirror the live `tools/list` schemas (verified Sep 2026): context arguments
-> such as `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required
-> where the live schema requires them, cart tools take `shoppingCartId`, and
-> `silpo_add_or_update_cart_products` takes `products`. `call_tool` always
-> passes arguments through verbatim for one-off calls. Responses come back
-> JSON-like (nested FastMCP `Root` dataclasses are unwrapped automatically).
+> mirror the live `tools/list` schemas (verified Sep 2026; re-verified Sep 7
+> 2026 — no drift found). Context arguments such as
+> `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
+> the live schema requires them, cart tools take `shoppingCartId`, and
+> `silpo_add_or_update_cart_products` takes `products`. The mock cart tools
+> (`silpo_get_shopping_cart_by_id`, `silpo_clear_shopping_cart`, ...) accept
+> **only** `shoppingCartId` — the legacy `cartId` alias was removed in 0.3.1
+> to match the live schema. `call_tool` always passes arguments through
+> verbatim for one-off calls. Responses come back JSON-like (nested FastMCP
+> `Root` dataclasses are unwrapped automatically).
 
 ### Smoke test against the real server
 
@@ -124,7 +128,7 @@ non-zero if the tool-name contract is violated or a battery call fails.
 |---|---|---|
 | `silpo_get_products` | `400 Bad Request` on plain `limit` without filter | smoke uses `category` or `set: klatsniznyzhky` |
 | `silpo_get_time_slots` | `-32602` for `deliveryTypes: ["B2B"]` | smoke filters `B2B` from `get_available_delivery_types` |
-| `silpo_get_my_favorites` | `Cannot read properties of null (reading 'id')` | treated as skipped — corrupted favorites entry |
+| `silpo_get_my_favorites` | `Cannot read properties of null (reading 'id')` — a corrupted favorites entry on the server side. The typed `get_favorites()` raises `SilpoToolExecutionError`; it is **not** a client/model drift. | smoke treats it as skipped; until Silpo fixes it, wrap `get_favorites()` in `try/except SilpoToolExecutionError` or use `call_tool("silpo_get_my_favorites", ...)` and handle the failure |
 | `silpo_get_product_details` | `slug: null` chain failure | resolved once `get_products` returns real slugs |
 
 Previously reported quirks that no longer reproduce (re-verified live, Sep 2026):

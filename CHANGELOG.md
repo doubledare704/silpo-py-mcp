@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.1 — 2026-09-07
+
+Re-verified all 40 tools against the live `tools/list` schemas and live
+response shapes (fresh OAuth run, Sep 7 2026). No drift in tool names and no
+typed-method input changes needed: every typed method except the known
+server-buggy `get_favorites` validated its live response through the current
+Pydantic models (29/30 passed; `silpo_get_my_favorites` still fails server-side
+with a corrupted-entry `null` id).
+
+### Fixed
+
+- Mock `silpo_get_shopping_cart_by_id` and `silpo_clear_shopping_cart` now
+  require only `shoppingCartId` — the legacy optional `cartId` alias (not
+  present in the live schema) was removed, matching the other cart tools.
+- Mock `silpo_add_or_update_certificates` accepts optional
+  `certificatesToAdd`/`certificatesToRemove` arrays like the live schema
+  (they are no longer mandatory arguments).
+
 ## 0.3.0 — 2026-09-06
 
 Full reconciliation of every typed method and mock tool with the live
