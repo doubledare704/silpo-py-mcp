@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.4.0 — 2026-09-10
+
+Reconciled with server release-1.110.0 and re-verified all 40 tools against
+the live `tools/list` schemas plus live responses with real data. No drift in
+tool names, argument names or required sets; the release's `get-products`
+change is description-only (sort-order and package-size guidance, no schema
+change — the client docstring now mentions the `inStock: true` trick).
+
+This is a **breaking release**: several Pydantic models are remodeled from
+the documented shapes to the live shapes, and two typed-method signatures
+changed.
+
+### Added
+
+- `CouponDetail` now exposes the release-1.110.0 `canBeAppliedToOrder`
+  eligibility flag plus `state`, `usedCount`, reward fields (`rewardText`/
+  `rewardValue`/`rewardUnit`/`rewardSign`/`rewardLimit`), `promoId`,
+  `limitText`/`warningText` and `progress` (`CouponProgress`), with
+  `business_coupon_id` auto-filled from the live numeric `id`.
+- Live fields across product/catalog models: `displayRatio`/
+  `specialPrices` on `SilpoProduct`; `ProductDetail` identity, pricing,
+  `url`/`images`/`attributes`; `url` on `Category`; live `children` on
+  `get_category` map onto `subcategories`.
+- Live loyalty shapes: `Coupon` reward/limit fields, `Promo`
+  (`selected`, reward/limit/warning text), `PromoCode` (`id`/`title`/
+  `active`), `Certificate` (`totalPrice`/`pincode`/`expireDate`/`title`),
+  `PremiumSubscription` (`status`, `dateFrom`/`dateTo`, `features`,
+  share links).
+- Live order shapes: `OnlineOrder` (`amount`, `delivery`, `address`,
+  `products`) and `OfflineReceipt` (`filId`/`filialName`/`sumReg`,
+  `rewards`, `products`); `DeliveryAddress` (`floor`/`entrance`/
+  `latitude`/`longitude`/`comment`); `FamilyMember`
+  (`image`/`profileCreatedAt`); `Profile.id`.
+- `DeliveryType` covers all 16 live enum values (was 5).
+- `get_certificates` accepts `limit`/`offset`.
+
+### Changed (breaking)
+
+- `CouponDetail`/`Coupon`/`Promo`/`PromoCode`/`Certificate`/
+  `PremiumSubscription`/`OnlineOrder`/`OfflineReceipt`/`ProductDetail` follow
+  the live field names; mock fixtures return the live shapes and tests assert
+  them (e.g. `total_price` instead of `nominal` for certificates).
+- `add_or_update_certificates` takes `list[str | dict]` and sends
+  `certificatesToAdd` as `[{barcode, pincode?}]` objects per the live schema
+  (plain strings are converted automatically).
+- `get_coupon_details` takes `business_coupon_id: int | float | str`.
+- Cart mutations (`add`/`remove`/`clear`/`update`/`certificates`) return the
+  live `success`/`summary`/`products`/`added`/`removed` fields on
+  `CartUpdateResult`; the live server does not echo the full cart, so call
+  `get_cart_by_id` afterwards (as the server itself mandates).
+- `get_cart_by_id` maps the live nesting onto `SilpoCart`: `branchId` from
+  `shipments[0]`, sums from `calculation`, `validations` from
+  `calculation.validations` (live `{level, type, message, context}` shape),
+  plus top-level `loyalty`/checkout links.
+
+### Fixed
+
+- `_unwrap_payload` now unwraps dict-valued envelopes (`profile`,
+  `loyalty`, `coupon`, `cart`) — previously `get_profile`,
+  `get_loyalty_info` and `get_coupon_details` validated but returned empty
+  objects against the live server.
+- `SilpoProduct.company_id`/`branch_id` accept `null` (live schema); `null`
+  `Address.address` no longer fails validation.
+- `TimeSlot.fast` accepts the live `{cost, time}` object; `NovaPoshtaOffice`
+  captures top-level `latitude`/`longitude`.
+
 ## 0.3.1 — 2026-09-07
 
 Re-verified all 40 tools against the live `tools/list` schemas and live

@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from silpo_py_mcp.models import (
+    CouponDetail,
     SilpoCart,
     SilpoProduct,
     TimeSlot,
@@ -91,6 +92,59 @@ def test_time_slot_alias_parsing() -> None:
     )
     assert slot.delivery_type == "DeliveryHome"
     assert slot.is_express
+
+
+def test_product_accepts_live_shape_with_null_company() -> None:
+    product = SilpoProduct.model_validate(
+        {
+            "id": "1eedda54-5d74-67fa-bda1-5f055a1d8638",
+            "name": "Печиво",
+            "slug": "pechyvo-1",
+            "price": 63.99,
+            "oldPrice": None,
+            "stock": 2.0,
+            "available": True,
+            "image": "https://example.com/p.png",
+            "weighted": False,
+            "step": 1.0,
+            "displayRatio": "0,3кг",
+            "specialPrices": None,
+            "companyId": None,
+            "branchId": None,
+            "externalProductId": 938168.0,
+        }
+    )
+    assert product.display_ratio == "0,3кг"
+    assert product.company_id is None
+
+
+def test_coupon_detail_live_shape() -> None:
+    coupon = CouponDetail.model_validate(
+        {
+            "id": 520703581,
+            "active": True,
+            "state": "Активний",
+            "canBeAppliedToOrder": True,
+            "useWay": "Електронний",
+            "beginDate": "2026-09-01",
+            "endDate": "2026-09-30",
+            "endDateTime": "2026-09-30T23:59:59",
+            "usedCount": 0,
+            "description": "Знижка",
+            "limitText": "Мінімум 500 грн",
+            "warningText": None,
+            "rewardText": "-50₴",
+            "rewardValue": 50.0,
+            "image": None,
+            "promoId": 304950,
+            "rewardUnit": "₴",
+            "rewardSign": "-",
+            "rewardLimit": 50.0,
+            "progress": None,
+        }
+    )
+    assert coupon.can_be_applied_to_order is True
+    assert coupon.business_coupon_id == 520703581
 
 
 def test_cart_defaults() -> None:

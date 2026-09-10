@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 
 from silpo_py_mcp.models.base import SilpoModel
 
@@ -42,16 +42,38 @@ class CartLoyalty(SilpoModel):
 
 
 class CartValidation(SilpoModel):
-    """A cart validation message (e.g. out-of-stock, slot conflict)."""
+    """A cart validation message.
 
-    code: str
-    message: str
+    Accepts both the live shape (``level``/``type``/``message``/``context``,
+    nested under ``calculation``) and the documented shape
+    (``code``/``message``/``severity``).
+    """
+
+    code: str = ""
+    message: str = ""
     severity: str = "warning"
+    level: str | None = None
+    validation_type: str | None = Field(default=None, alias="type")
+    context: dict[str, Any] | list[Any] | None = None
     product_id: str | None = Field(default=None, alias="productId")
+
+    @model_validator(mode="after")
+    def _fill_from_live(self) -> CartValidation:
+        if not self.code and self.validation_type:
+            self.code = self.validation_type
+        if self.level and self.severity == "warning":
+            self.severity = self.level
+        return self
 
 
 class SilpoCart(SilpoModel):
-    """The full shopping cart."""
+    """The full shopping cart.
+
+    The mock returns ``items``/``totals``/``branchId`` at the top level; the
+    live server nests products under ``shipments[].products`` and sums under
+    ``calculation`` (see ``SilpoClient.get_cart_by_id``, which maps those onto
+    ``branch_id``/``totals``/``validations``).
+    """
 
     cart_id: str = Field(default="", validation_alias=AliasChoices("cartId", "id"))
     branch_id: str = Field(default="", alias="branchId")
@@ -59,6 +81,8 @@ class SilpoCart(SilpoModel):
     timeslot: str | dict[str, Any] | None = None
     address: str | dict[str, Any] | None = None
     items: list[CartItem] = Field(default_factory=list)
+    shipments: list[dict[str, Any]] = Field(default_factory=list)
+    calculation: dict[str, Any] | None = None
     totals: CartTotals = Field(default_factory=CartTotals)
     loyalty: CartLoyalty = Field(default_factory=CartLoyalty)
     validations: list[CartValidation] = Field(default_factory=list)
@@ -104,11 +128,18 @@ class CartLineInput(SilpoModel):
 
 
 class CartUpdateResult(SilpoModel):
-    """Result of a cart mutation."""
+    """Result of a cart mutation.
 
+    The mock returns the full ``cart``; the live server returns only
+    ``success``/``summary`` plus ``products``/``shoppingCartId``/``added``/
+    ``removed`` — call ``get_cart_by_id`` afterwards to verify the cart.
+    """
+
+    success: bool = True
+    summary: str | None = None
     cart: SilpoCart = Field(default_factory=SilpoCart)
     changed: bool = True
     products: list[dict[str, Any]] | None = None
     shopping_cart_id: str | None = Field(default=None, alias="shoppingCartId")
-    added: list[str] | None = None
+    added: list[Any] | None = None
     removed: list[str] | None = None

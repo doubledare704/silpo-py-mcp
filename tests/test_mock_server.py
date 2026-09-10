@@ -86,6 +86,31 @@ async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:
         assert updated.data["cart"]["totals"]["totalPrice"] == 89.0 - 50.0
 
 
+async def test_mock_coupon_details_eligibility_flag(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool("silpo_get_coupon_details", {"businessCouponId": 520703581})
+        assert result.data["canBeAppliedToOrder"] is True
+        assert result.data["state"] == "Активний"
+
+
+async def test_mock_certificates_accept_barcode_objects(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        summary = await client.call_tool("silpo_get_my_shopping_cart", {})
+        cart_id = summary.data["cartId"]
+        result = await client.call_tool(
+            "silpo_add_or_update_certificates",
+            {
+                "shoppingCartId": cart_id,
+                "certificatesToAdd": [{"barcode": "4820000000002", "pincode": "1234"}],
+                "certificatesToRemove": [],
+            },
+        )
+        assert result.data["added"][0]["barcode"] == "4820000000002"
+        assert result.data["removed"] == []
+
+
 async def test_mock_create_shopping_cart_is_idempotent(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:

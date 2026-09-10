@@ -89,11 +89,17 @@ asyncio.run(main())
 ```
 
 > **Note on typed methods vs the real server.** The typed methods and the mock
-> mirror the live `tools/list` schemas (verified Sep 2026; re-verified Sep 7
-> 2026 — no drift found). Context arguments such as
+> mirror the live `tools/list` schemas and response shapes (verified Sep 2026;
+> re-verified Sep 7 2026; reconciled with server release-1.110.0 on Sep 10
+> 2026). Context arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them, cart tools take `shoppingCartId`, and
-> `silpo_add_or_update_cart_products` takes `products`. The mock cart tools
+> `silpo_add_or_update_cart_products` takes `products`.
+> `silpo_add_or_update_certificates` takes `certificatesToAdd`/
+> `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
+> strings are converted automatically). Coupon eligibility comes from
+> `canBeAppliedToOrder` on `silpo_get_coupon_details` — never infer it from
+> `active`/`state` alone. The mock cart tools
 > (`silpo_get_shopping_cart_by_id`, `silpo_clear_shopping_cart`, ...) accept
 > **only** `shoppingCartId` — the legacy `cartId` alias was removed in 0.3.1
 > to match the live schema. `call_tool` always passes arguments through

@@ -20,7 +20,7 @@ class GeoPoint(SilpoModel):
 class Address(SilpoModel):
     """A resolved street address returned by the Silpo API."""
 
-    address: str
+    address: str = ""
     city: str | None = None
     street: str | None = None
     house_number: str | None = Field(default=None, alias="houseNumber")
@@ -40,13 +40,27 @@ class Address(SilpoModel):
 
 
 class DeliveryType(StrEnum):
-    """Supported delivery types returned by Silpo."""
+    """Supported delivery types returned by Silpo.
 
-    DELIVERY_HOME = "DeliveryHome"
-    WIDE_ASSORT = "WideAssortDelivery"
+    Mirrors the live ``deliveryType`` enum from ``tools/list``.
+    """
+
+    UNKNOWN = "Unknown"
     SELF_PICKUP = "SelfPickup"
+    DELIVERY_HOME = "DeliveryHome"
+    DELIVERY_FLAT = "DeliveryFlat"
+    DELIVERY_OFFICE = "DeliveryOffice"
+    DELIVERY_GLOVO = "DeliveryGlovo"
+    DELIVERY_EXPRESS = "DeliveryExpress"
+    DELIVERY_EXPRESS_FOOD = "DeliveryExpressFood"
+    JUST_IN = "JustIn"
+    LONG_DELIVERY = "LongDelivery"
+    JUST_IN_POST = "JustInPost"
     NOVA_POSHTA = "NovaPoshta"
+    DELIVERY_EXPRESS_BY_PROMISE = "DeliveryExpressByPromise"
+    WIDE_ASSORT = "WideAssortDelivery"
     B2B = "B2B"
+    PRE_ORDER = "PreOrder"
 
 
 class AvailableDeliveryType(SilpoModel):
@@ -126,10 +140,11 @@ class TimeSlot(SilpoModel):
     is_available: bool = Field(default=True, validation_alias=AliasChoices("isAvailable", "available"))
     is_express: bool = Field(default=False, alias="isExpress")
     delivery_cost: float | None = Field(default=None, alias="deliveryCost")
+    delivery_cost_map: list[dict[str, Any]] | None = Field(default=None, alias="deliveryCostMap")
     min_order_cost: float | None = Field(default=None, alias="minOrderCost")
     max_weight: float | None = Field(default=None, alias="maxWeight")
     constraints: dict[str, Any] | None = None
-    fast: bool | None = None
+    fast: dict[str, Any] | None = None
 
 
 class NovaPoshtaSettlement(SilpoModel):
@@ -149,5 +164,13 @@ class NovaPoshtaOffice(SilpoModel):
     address: str | None = None
     type: str | None = Field(default=None, description="office | postomat")
     coordinates: GeoPoint | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     number: float | None = None
     status: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_coordinates(self) -> NovaPoshtaOffice:
+        if self.coordinates is None and self.latitude is not None and self.longitude is not None:
+            self.coordinates = GeoPoint(lat=self.latitude, lng=self.longitude)
+        return self

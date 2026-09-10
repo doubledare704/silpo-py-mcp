@@ -64,6 +64,12 @@ PRODUCTS: list[dict[str, Any]] = [
         "category": "Молочні продукти",
         "imageUrl": "https://images.silpo.ua/mock/milk.png",
         "unit": "шт",
+        "stock": 10.0,
+        "weighted": False,
+        "step": 1.0,
+        "displayRatio": "900мл",
+        "specialPrices": None,
+        "externalProductId": 100001,
     },
     {
         "productId": "prd-bread",
@@ -80,6 +86,12 @@ PRODUCTS: list[dict[str, Any]] = [
         "category": "Хліб та випічка",
         "imageUrl": "https://images.silpo.ua/mock/bread.png",
         "unit": "шт",
+        "stock": 20.0,
+        "weighted": False,
+        "step": 1.0,
+        "displayRatio": "500г",
+        "specialPrices": None,
+        "externalProductId": 100002,
     },
     {
         "productId": "prd-eggs",
@@ -96,6 +108,12 @@ PRODUCTS: list[dict[str, Any]] = [
         "category": "Яйця",
         "imageUrl": "https://images.silpo.ua/mock/eggs.png",
         "unit": "шт",
+        "stock": 15.0,
+        "weighted": False,
+        "step": 1.0,
+        "displayRatio": "10 шт",
+        "specialPrices": None,
+        "externalProductId": 100003,
     },
     {
         "productId": "prd-cheese",
@@ -112,6 +130,12 @@ PRODUCTS: list[dict[str, Any]] = [
         "category": "Молочні продукти",
         "imageUrl": "https://images.silpo.ua/mock/cheese.png",
         "unit": "шт",
+        "stock": 8.0,
+        "weighted": False,
+        "step": 1.0,
+        "displayRatio": "250г",
+        "specialPrices": [{"price": 80.0, "count": 2, "type": "bulk"}],
+        "externalProductId": 100004,
     },
     {
         "productId": "prd-apples",
@@ -128,6 +152,12 @@ PRODUCTS: list[dict[str, Any]] = [
         "category": "Фрукти та овочі",
         "imageUrl": "https://images.silpo.ua/mock/apples.png",
         "unit": "кг",
+        "stock": 0.0,
+        "weighted": True,
+        "step": 0.5,
+        "displayRatio": "1кг",
+        "specialPrices": None,
+        "externalProductId": 100005,
     },
 ]
 
@@ -138,6 +168,7 @@ CATEGORIES: list[dict[str, Any]] = [
         "title": "Молочні продукти",
         "parentId": None,
         "productCount": 2,
+        "url": "https://silpo.ua/category/molochni",
     },
     {
         "id": "cat-bread",
@@ -145,6 +176,7 @@ CATEGORIES: list[dict[str, Any]] = [
         "title": "Хліб та випічка",
         "parentId": None,
         "productCount": 1,
+        "url": "https://silpo.ua/category/hlib",
     },
     {
         "id": "cat-eggs",
@@ -152,6 +184,7 @@ CATEGORIES: list[dict[str, Any]] = [
         "title": "Яйця",
         "parentId": "cat-dairy",
         "productCount": 1,
+        "url": "https://silpo.ua/category/yaytsya",
     },
     {
         "id": "cat-fruit",
@@ -159,41 +192,32 @@ CATEGORIES: list[dict[str, Any]] = [
         "title": "Фрукти та овочі",
         "parentId": None,
         "productCount": 1,
+        "url": "https://silpo.ua/category/frukti",
     },
 ]
 
 PROMOTIONS: list[dict[str, Any]] = [
     {
-        "id": "promo-1",
+        "code": "price-week-1",
         "title": "Ціна тижня: Яйця С1",
-        "description": "Знижка 12% на яйця курячі С1.",
-        "discountPercent": 12,
-        "priceFrom": 54.9,
-        "priceTo": 62.0,
-        "startsAt": "2026-08-01T00:00:00Z",
-        "endsAt": "2026-09-01T23:59:59Z",
-        "isPriceOfWeek": True,
-        "imageUrl": "https://images.silpo.ua/mock/promo1.png",
+        "productCount": 1,
+        "url": "https://silpo.ua/offers/price-week-1",
     },
     {
-        "id": "promo-2",
+        "code": "cheese-15",
         "title": "Сир Гауда -15%",
-        "description": "Знижка на сир Гауда 45%.",
-        "discountPercent": 15,
-        "priceFrom": 89.0,
-        "priceTo": 110.0,
-        "startsAt": "2026-08-01T00:00:00Z",
-        "endsAt": "2026-08-31T23:59:59Z",
-        "isPriceOfWeek": False,
-        "imageUrl": "https://images.silpo.ua/mock/promo2.png",
+        "productCount": 1,
+        "url": "https://silpo.ua/offers/cheese-15",
     },
 ]
 
 PRODUCT_SETS: list[dict[str, Any]] = [
     {
         "id": "set-1",
+        "slug": "snidanok-150",
         "title": "Сніданок за 150 грн",
         "description": "Молоко, хліб, яйця — зберіть сніданок вигідно.",
+        "link": "https://silpo.ua/sets/snidanok-150",
         "products": [PRODUCTS[0], PRODUCTS[1], PRODUCTS[2]],
     }
 ]
@@ -211,22 +235,48 @@ FIXTURE_ADDRESSES = [
 ]
 
 NOVA_POSHTA_SETTLEMENTS = [
-    {"settlementId": "np-kyiv", "name": "Київ", "region": "Київська обл."},
-    {"settlementId": "np-lviv", "name": "Львів", "region": "Львівська обл."},
+    {
+        "settlementId": "np-kyiv",
+        "id": "np-kyiv",
+        "name": "Київ",
+        "title": "Київ",
+        "region": "Київська обл.",
+        "area": None,
+    },
+    {
+        "settlementId": "np-lviv",
+        "id": "np-lviv",
+        "name": "Львів",
+        "title": "Львів",
+        "region": "Львівська обл.",
+        "area": None,
+    },
 ]
 
 NOVA_POSHTA_OFFICES = [
     {
         "officeId": "np-office-1",
+        "id": "np-office-1",
         "name": "Відділення №1",
+        "title": "Відділення №1",
         "address": "вул. Центральна, 1",
         "type": "office",
+        "number": 1,
+        "status": "active",
+        "latitude": 50.4501,
+        "longitude": 30.5234,
     },
     {
         "officeId": "np-postomat-1",
+        "id": "np-postomat-1",
         "name": "Поштомат біля метро",
+        "title": "Поштомат біля метро",
         "address": "вул. Київська, 2",
         "type": "postomat",
+        "number": 2,
+        "status": "active",
+        "latitude": 50.4510,
+        "longitude": 30.5240,
     },
 ]
 
@@ -344,12 +394,14 @@ class SilpoMockServer:
             return [
                 {
                     "type": "DeliveryHome",
+                    "deliveryType": "DeliveryHome",
                     "branchId": "bran-1",
                     "description": "Доставка додому",
                     "minOrder": 400.0,
                 },
                 {
                     "type": "SelfPickup",
+                    "deliveryType": "SelfPickup",
                     "branchId": "bran-1",
                     "description": "Самовивіз",
                     "minOrder": 0.0,
@@ -392,8 +444,13 @@ class SilpoMockServer:
                     "branchId": branchId,
                     "startsAt": f"2026-09-02T0{i + 8}:00:00Z",
                     "endsAt": f"2026-09-02T0{i + 10}:00:00Z",
+                    "start": f"2026-09-02T0{i + 8}:00:00Z",
+                    "end": f"2026-09-02T0{i + 10}:00:00Z",
                     "price": 0.0 if i == 0 else 45.0,
+                    "deliveryCost": 0.0 if i == 0 else 45.0,
+                    "minOrderCost": 199.0,
                     "isAvailable": True,
+                    "available": True,
                     "isExpress": i == 0,
                 }
                 for i in range(3)
@@ -404,7 +461,7 @@ class SilpoMockServer:
         def silpo_find_nova_poshta_settlements(title: str) -> list[dict[str, Any]]:
             """Find Nova Poshta settlements by name."""
             q = title.lower()
-            return [s for s in NOVA_POSHTA_SETTLEMENTS if q in s["name"].lower()]
+            return [s for s in NOVA_POSHTA_SETTLEMENTS if q in str(s["name"]).lower()]
 
         @self._fastmcp.tool
         def silpo_find_nova_poshta_offices(
@@ -494,17 +551,28 @@ class SilpoMockServer:
             timeslotStart: str,
             timeslotEnd: str,
         ) -> dict[str, Any]:
-            """Full product card: composition, nutritional value, attributes."""
+            """Full product card: price, stock, images, attributes."""
             _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
             product = next((p for p in PRODUCTS if p["slug"] == slug), None)
             if product is None:
                 raise ValueError(f"Product not found: {slug}")
             return {
-                **product,
-                "description": "Опис товару (мок).",
-                "composition": ["складник 1", "складник 2"],
-                "nutritionalValue": {"energyKcal": 42, "proteins": 3.0, "fats": 2.5, "carbs": 4.8},
+                "id": product["productId"],
+                "name": product["title"],
+                "slug": product["slug"],
+                "price": product["price"],
+                "oldPrice": product["oldPrice"],
+                "stock": product.get("stock", 10.0),
+                "available": product["isAvailable"],
+                "weighted": product.get("weighted", False),
+                "step": product.get("step", 1.0),
+                "ratio": product.get("unit", "шт"),
+                "displayRatio": product.get("displayRatio"),
+                "url": f"https://silpo.ua/product/{product['slug']}",
+                "images": [product["imageUrl"]],
                 "attributes": {"brand": product["brand"]},
+                "companyId": product["companyId"],
+                "branchId": product["branchId"],
             }
 
         @self._fastmcp.tool
@@ -531,10 +599,10 @@ class SilpoMockServer:
             companyId: str,
             productIds: list[str],
             deliveryType: str,
-        ) -> list[dict[str, Any]]:
+        ) -> dict[str, Any]:
             """Replacements for out-of-stock products."""
             _ = (branchId, companyId, deliveryType)
-            replacements = []
+            items: list[dict[str, Any]] = []
             for productId in productIds:
                 product = self._find_product(productId)
                 if product and not product["isAvailable"]:
@@ -542,9 +610,10 @@ class SilpoMockServer:
                         (p for p in PRODUCTS if p["isAvailable"] and p["category"] == product["category"]),
                         None,
                     )
-                    if alt:
-                        replacements.append({"productId": productId, "replacement": alt})
-            return replacements
+                    items.append({"productId": productId, "replacements": [alt] if alt else []})
+                else:
+                    items.append({"productId": productId, "replacements": []})
+            return {"success": True, "summary": f"Checked {len(items)} products", "items": items}
 
         @self._fastmcp.tool
         def silpo_get_my_favorites(
@@ -574,7 +643,11 @@ class SilpoMockServer:
                 else:
                     if pid in self._favorites:
                         self._favorites.remove(pid)
-            return {"productIds": self._favorites}
+            return {
+                "success": True,
+                "summary": f"Favorites updated ({len(self._favorites)} total)",
+                "actions": actions,
+            }
 
     # Catalog (6)
     def _register_catalog_tools(self) -> None:
@@ -614,7 +687,16 @@ class SilpoMockServer:
             if category is None:
                 raise ValueError(f"Category not found: {cid}")
             subcats = [c for c in CATEGORIES if c["parentId"] == cid]
-            return {"category": category, "subcategories": subcats}
+            return {
+                "success": True,
+                "category": {
+                    **category,
+                    "path": None,
+                    "priceRange": None,
+                    "children": [{"id": c["id"], "slug": c["slug"], "title": c["title"]} for c in subcats],
+                    "visible": True,
+                },
+            }
 
         @self._fastmcp.tool
         def silpo_get_categories(
@@ -656,7 +738,8 @@ class SilpoMockServer:
         @self._fastmcp.tool
         def silpo_get_my_shopping_cart(context: Context) -> dict[str, Any]:
             """Return the ID of the active cart."""
-            return {"cartId": self._ensure_cart(self._session_key(context))}
+            cart_id = self._ensure_cart(self._session_key(context))
+            return {"success": True, "cartId": cart_id, "shoppingCartId": cart_id, "exists": True}
 
         @self._fastmcp.tool
         def silpo_create_shopping_cart(
@@ -827,16 +910,26 @@ class SilpoMockServer:
         @self._fastmcp.tool
         def silpo_add_or_update_certificates(
             shoppingCartId: str,
-            certificatesToAdd: list[str] | None = None,
-            certificatesToRemove: list[str] | None = None,
+            certificatesToAdd: list[Any] | None = None,
+            certificatesToRemove: list[Any] | None = None,
         ) -> dict[str, Any]:
             """Add or remove gift certificates from the cart."""
             if shoppingCartId not in self._carts:
                 raise ValueError(f"Cart not found: {shoppingCartId}")
             cart = self._carts[shoppingCartId]
             _ = certificatesToRemove
-            cart["certificates"] = certificatesToAdd or []
-            return {"cart": cart, "changed": True}
+
+            def _barcode(cert: Any) -> str:
+                return cert.get("barcode", "") if isinstance(cert, dict) else str(cert)
+
+            added = [_barcode(c) for c in (certificatesToAdd or [])]
+            cart["certificates"] = added
+            return {
+                "success": True,
+                "summary": f"Added {len(added)} certificates",
+                "added": [{"barcode": b, "faceValue": None, "validations": []} for b in added],
+                "removed": [],
+            }
 
     # Orders (2)
     def _register_order_tools(self) -> None:
@@ -850,17 +943,33 @@ class SilpoMockServer:
             return [
                 {
                     "orderId": "ord-1",
+                    "number": "1001",
                     "createdAt": "2026-07-15T10:30:00Z",
                     "status": "delivered",
-                    "totalPrice": 245.5,
-                    "deliveryType": "DeliveryHome",
-                    "items": [
+                    "amount": 245.5,
+                    "discount": 12.0,
+                    "delivery": {
+                        "type": "DeliveryHome",
+                        "timeSlot": {"from": "2026-07-15T10:00:00Z", "to": "2026-07-15T11:00:00Z"},
+                        "deliveredAt": "2026-07-15T10:45:00Z",
+                    },
+                    "address": {
+                        "city": "Київ",
+                        "street": "вул. Анни Ахматової",
+                        "building": "9",
+                        "apartment": "19",
+                    },
+                    "products": [
                         {
-                            "productId": "prd-milk-2pct",
-                            "title": "Молоко Премія 2.5% 900 мл",
+                            "id": "prd-milk-2pct",
+                            "name": "Молоко Премія 2.5% 900 мл",
+                            "price": 36.9,
                             "quantity": 2,
-                            "unitPrice": 36.9,
-                            "totalPrice": 73.8,
+                            "subtotal": 73.8,
+                            "removed": False,
+                            "image": "https://images.silpo.ua/mock/milk.png",
+                            "companyId": "co-1",
+                            "branchId": "bran-1",
                         }
                     ],
                 }
@@ -881,13 +990,18 @@ class SilpoMockServer:
             _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit, offset, dateStart, dateEnd)
             return [
                 {
-                    "receiptId": "rec-1",
-                    "branchName": "Сільпо Львів (центр)",
-                    "purchasedAt": "2026-07-01T18:15:00Z",
-                    "totalPrice": 180.0,
-                    "discount": 12.0,
-                    "bonusesEarned": 3.6,
-                    "items": [],
+                    "filId": 1998,
+                    "filialName": "Сільпо Львів (центр)",
+                    "cityName": "Львів",
+                    "createdAt": "2026-07-01T18:15:00Z",
+                    "sumReg": 180.0,
+                    "accruedBalaBonusesSum": 3.6,
+                    "sumDiscount": 12.0,
+                    "receiptUrl": "https://silpo.ua/receipt/rec-1",
+                    "chequeMagicName": None,
+                    "chequePrediction": None,
+                    "rewards": [],
+                    "products": [],
                 }
             ]
 
@@ -897,10 +1011,15 @@ class SilpoMockServer:
         def silpo_get_my_profile() -> dict[str, Any]:
             """Profile data: name, phone, email, birth date."""
             return {
-                "name": "Олексій",
+                "id": "profile-1",
+                "firstName": "Олексій",
+                "lastName": "Овдієнко",
+                "middleName": None,
                 "phone": "+380501112233",
                 "email": "oleksii@example.com",
-                "birthDate": None,
+                "birthday": None,
+                "gender": None,
+                "status": "active",
             }
 
         @self._fastmcp.tool
@@ -908,10 +1027,17 @@ class SilpoMockServer:
             """Saved delivery addresses."""
             return [
                 {
-                    "addressId": "addr-1",
-                    "label": "Дім",
-                    "text": "Київ, вул. Анни Ахматової, 9",
-                    "coordinates": {"lat": 50.3957, "lng": 30.6217},
+                    "id": "addr-1",
+                    "tag": "Дім",
+                    "city": "Київ",
+                    "street": "вул. Анни Ахматової",
+                    "building": "9",
+                    "apartment": "19",
+                    "floor": None,
+                    "entrance": None,
+                    "latitude": 50.3957,
+                    "longitude": 30.6217,
+                    "comment": None,
                 }
             ]
 
@@ -919,14 +1045,31 @@ class SilpoMockServer:
         def silpo_get_my_family() -> list[dict[str, Any]]:
             """Family members in the profile."""
             return [
-                {"memberType": "child", "name": "Софія", "age": 7},
-                {"memberType": "pet", "name": "Барсик", "age": 3},
+                {
+                    "profileId": "member-1",
+                    "name": "Софія",
+                    "phone": "+380501112234",
+                    "image": None,
+                    "profileCreatedAt": "2026-01-01T00:00:00Z",
+                    "itsMe": False,
+                },
+                {
+                    "profileId": "member-me",
+                    "name": "Олексій",
+                    "phone": "+380501112233",
+                    "image": None,
+                    "profileCreatedAt": "2025-01-01T00:00:00Z",
+                    "itsMe": True,
+                },
             ]
 
         @self._fastmcp.tool
         def silpo_get_my_food_restrictions() -> dict[str, Any]:
             """Dietary restrictions and food preferences."""
-            return {"restrictions": ["безлактозна дієта"], "preferences": ["органічні продукти"]}
+            return {
+                "restrictions": [{"slug": "lactose-free", "name": "безлактозна дієта"}],
+                "preferences": ["органічні продукти"],
+            }
 
     # Loyalty & promotions (7)
     def _register_loyalty_tools(self) -> None:
@@ -945,29 +1088,50 @@ class SilpoMockServer:
             """Available discount coupons."""
             return [
                 {
-                    "couponId": "cup-1",
-                    "businessCouponId": 1,
-                    "title": "Знижка 50 грн від 500 грн",
-                    "discount": 50.0,
-                    "expiresAt": "2026-09-30T23:59:59Z",
-                    "barcode": "4820000000001",
+                    "id": 520703581,
+                    "active": True,
+                    "useWay": "Електронний",
+                    "beginDate": "2026-09-01",
+                    "endDate": "2026-09-30",
+                    "endDateTime": "2026-09-30T23:59:59",
+                    "description": "Знижка 50 грн від 500 грн",
+                    "limitText": "Мінімальне замовлення 500 грн",
+                    "warningText": "Один купон на замовлення",
+                    "image": "https://images.silpo.ua/mock/coupon.png",
+                    "promoId": 304950,
+                    "rewardText": "-50₴",
+                    "rewardValue": 50.0,
+                    "rewardUnit": "₴",
+                    "rewardSign": "-",
+                    "rewardLimit": 50.0,
                 }
             ]
 
         @self._fastmcp.tool
-        def silpo_get_coupon_details(businessCouponId: int | str) -> dict[str, Any]:
-            """Full coupon info: conditions, products, barcode."""
-            _ = str(businessCouponId)  # mock returns the fixture coupon for any id
+        def silpo_get_coupon_details(businessCouponId: int | float) -> dict[str, Any]:
+            """Full coupon info: eligibility, conditions, reward, progress."""
+            _ = businessCouponId  # mock returns the fixture coupon for any id
             return {
-                "couponId": "cup-1",
-                "businessCouponId": 1,
-                "title": "Знижка 50 грн від 500 грн",
-                "discount": 50.0,
-                "expiresAt": "2026-09-30T23:59:59Z",
-                "barcode": "4820000000001",
-                "description": "Знижка застосовується до замовлення від 500 грн.",
-                "conditions": ["Мінімальне замовлення 500 грн", "Один купон на замовлення"],
-                "productIds": [],
+                "id": 520703581,
+                "active": True,
+                "state": "Активний",
+                "canBeAppliedToOrder": True,
+                "useWay": "Електронний",
+                "beginDate": "2026-09-01",
+                "endDate": "2026-09-30",
+                "endDateTime": "2026-09-30T23:59:59",
+                "usedCount": 0,
+                "description": "Знижка 50 грн від 500 грн",
+                "limitText": "Мінімальне замовлення 500 грн",
+                "warningText": "Один купон на замовлення",
+                "rewardText": "-50₴",
+                "rewardValue": 50.0,
+                "image": "https://images.silpo.ua/mock/coupon.png",
+                "promoId": 304950,
+                "rewardUnit": "₴",
+                "rewardSign": "-",
+                "rewardLimit": 50.0,
+                "progress": None,
             }
 
         @self._fastmcp.tool
@@ -975,10 +1139,17 @@ class SilpoMockServer:
             """Personal promo offers."""
             return [
                 {
-                    "promoId": "promo-offer-1",
-                    "title": "Промо: Сир Гауда -15%",
+                    "promoId": 257654,
+                    "selected": True,
+                    "beginDate": "2026-08-01",
+                    "endDate": "2026-09-01",
                     "description": "Особиста пропозиція на сир.",
-                    "expiresAt": "2026-09-01T23:59:59Z",
+                    "rewardText": "-15%",
+                    "rewardValue": 15.0,
+                    "limitText": "Діє на сир Гауда",
+                    "warningText": None,
+                    "addressListText": None,
+                    "image": "https://images.silpo.ua/mock/promo.png",
                 }
             ]
 
@@ -987,9 +1158,10 @@ class SilpoMockServer:
             """Active promo codes."""
             return [
                 {
+                    "id": "promo-code-1",
                     "code": "SUMMER2026",
-                    "description": "Знижка 5% на перше замовлення",
-                    "expiresAt": None,
+                    "title": "Знижка 5% на перше замовлення",
+                    "active": True,
                 }
             ]
 
@@ -1002,12 +1174,14 @@ class SilpoMockServer:
             _ = (limit, offset)
             return [
                 {
-                    "certificateId": "cert-1",
-                    "code": "GIFT-2026-0001",
+                    "id": 1,
+                    "createdAt": "2026-01-01T00:00:00",
+                    "totalPrice": 200.0,
                     "barcode": "4820000000002",
-                    "nominal": 200.0,
-                    "balance": 150.0,
-                    "expiresAt": "2026-12-31T23:59:59Z",
+                    "pincode": None,
+                    "expireDate": "2026-12-31",
+                    "title": "Подарунковий сертифікат 200 грн",
+                    "image": "https://images.silpo.ua/mock/cert.png",
                 }
             ]
 
@@ -1015,7 +1189,19 @@ class SilpoMockServer:
         def silpo_get_my_premium_subscription() -> dict[str, Any]:
             """Silpo Premium subscription status."""
             return {
-                "isActive": True,
-                "endsAt": "2026-11-30T23:59:59Z",
-                "benefits": ["Безкоштовна доставка", "Персональні знижки"],
+                "success": True,
+                "summary": "Active premium subscription",
+                "webLink": "https://silpo.ua/subscription",
+                "mobileLink": "https://link.silpo.ua/mock",
+                "id": "sub-1",
+                "profileId": "profile-1",
+                "subscriptionId": "premium-1",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "status": "active",
+                "dateFrom": "2026-01-01T00:00:00Z",
+                "dateTo": "2026-11-30T23:59:59Z",
+                "features": [],
+                "bonusesObtainedAmount": 10.0,
+                "shareWebLink": "https://silpo.ua/subscription/share",
+                "shareMobileLink": "https://link.silpo.ua/mock-share",
             }

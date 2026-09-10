@@ -10,11 +10,17 @@ from silpo_py_mcp.models.base import SilpoModel
 
 
 class SilpoProduct(SilpoModel):
-    """A product as returned by product search tools."""
+    """A product as returned by product search tools.
+
+    Accepts both the live shape (``id``/``name``/``available``/``image``/
+    ``displayRatio``/``specialPrices``, nullable ``companyId``/``branchId``)
+    and the mock/documented shape (``productId``/``title``/``isOnSale``/
+    ``isPrivateLabel``/``category``).
+    """
 
     product_id: str = Field(validation_alias=AliasChoices("productId", "id"), description="Silpo product identifier.")
-    company_id: str = Field(alias="companyId", description="Company (supplier) identifier.")
-    branch_id: str = Field(alias="branchId", description="Branch/store identifier.")
+    company_id: str | None = Field(default=None, alias="companyId", description="Company (supplier) identifier.")
+    branch_id: str | None = Field(default=None, alias="branchId", description="Branch/store identifier.")
     title: str = Field(validation_alias=AliasChoices("title", "name"))
     slug: str | None = None
     brand: str | None = None
@@ -29,17 +35,40 @@ class SilpoProduct(SilpoModel):
     stock: float | None = None
     weighted: bool | None = None
     step: float | None = None
+    display_ratio: str | None = Field(default=None, alias="displayRatio")
+    special_prices: list[dict[str, Any]] | None = Field(default=None, alias="specialPrices")
     external_product_id: int | None = Field(default=None, alias="externalProductId")
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProductDetail(SilpoModel):
-    """Full product card: composition, nutritional value, attributes."""
+    """Full product card from ``silpo_get_product_details``.
 
+    Live shape: identity (``id``/``name``/``slug``), pricing, stock,
+    ``displayRatio``/``url``/``images``/``attributes``. The legacy
+    ``description``/``composition``/``nutritionalValue`` fields are kept for
+    backward compatibility with older fixtures.
+    """
+
+    product_id: str | None = Field(default=None, validation_alias=AliasChoices("productId", "id"))
+    company_id: str | None = Field(default=None, alias="companyId")
+    branch_id: str | None = Field(default=None, alias="branchId")
+    title: str | None = Field(default=None, validation_alias=AliasChoices("title", "name"))
+    slug: str | None = None
+    price: float | None = None
+    old_price: float | None = Field(default=None, alias="oldPrice")
+    stock: float | None = None
+    is_available: bool | None = Field(default=None, validation_alias=AliasChoices("isAvailable", "available"))
+    weighted: bool | None = None
+    step: float | None = None
+    ratio: str | None = None
+    display_ratio: str | None = Field(default=None, alias="displayRatio")
+    url: str | None = None
+    images: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
     description: str | None = None
     composition: list[str] = Field(default_factory=list)
     nutritional_value: dict[str, Any] = Field(default_factory=dict, alias="nutritionalValue")
-    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProductSearchResult(SilpoModel):

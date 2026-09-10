@@ -255,8 +255,9 @@ class SilpoClient:
         """Unwrap a live envelope (``{success, summary, <key>, ...}``) into its data.
 
         Returns the payload unchanged when it is already a list or when none of
-        the keys holds a list, so the mock's documented responses pass through
-        untouched.
+        the keys is present, so the mock's documented responses pass through
+        untouched. List values are returned directly; dict values (``profile``,
+        ``loyalty``, ``coupon``, ``cart``) are returned as-is.
         """
         if not isinstance(payload, dict):
             return payload
@@ -268,6 +269,7 @@ class SilpoClient:
                 for inner in ("items", "list", "results", "products"):
                     if isinstance(value.get(inner), list):
                         return value[inner]
+                return value
         return payload
 
     # -- Location & delivery (6) --------------------------------------------
@@ -432,7 +434,13 @@ class SilpoClient:
         from_price: float | None = None,
         to_price: float | None = None,
     ) -> ProductSearchResult:
-        """Products with filters: category, promotion, stock, price, pagination."""
+        """Products with filters: category, promotion, stock, price, pagination.
+
+        At least one of ``category``/``must_have_promotion``/``promotion_code``/
+        ``product_set`` is required by the server. Sort order caveat: the API
+        sorts in-stock and out-of-stock products independently within each
+        group, so set ``in_stock=True`` for a single continuously-sorted list.
+        """
         args: dict[str, Any] = {
             "branchId": branch_id,
             "deliveryType": delivery_type,
@@ -483,7 +491,7 @@ class SilpoClient:
         timeslot_start: str,
         timeslot_end: str,
     ) -> ProductDetail:
-        """Full product card: composition, nutritional value, attributes."""
+        """Full product card: price, stock, images, attributes, package size."""
         payload = await self.call_tool(
             SilpoTool.GET_PRODUCT_DETAILS,
             {
@@ -591,6 +599,10 @@ class SilpoClient:
             SilpoTool.GET_CATEGORY,
             {"branchId": branch_id, "deliveryType": delivery_type, "categorySlug": category_slug},
         )
+        if isinstance(payload, dict):
+            category = payload.get("category")
+            if isinstance(category, dict) and isinstance(category.get("children"), list):
+                payload = {**payload, "subcategories": category["children"]}
         return self._validate(payload, CategoryDetail)
 
     async def get_categories(
@@ -699,7 +711,32 @@ class SilpoClient:
     async def get_cart_by_id(self, cart_id: str) -> SilpoCart:
         """Return the full cart: items, delivery, slot, sums, validations."""
         payload = await self.call_tool(SilpoTool.GET_SHOPPING_CART_BY_ID, {"shoppingCartId": cart_id})
-        payload = self._unwrap_payload(payload, "cart")
+        if isinstance(payload, dict) and isinstance(payload.get("cart"), dict):
+            cart = dict(payload["cart"])
+            cart.setdefault("loyalty", payload.get("loyalty"))
+            cart.setdefault("checkoutWebLink", payload.get("checkoutWebLink"))
+            cart.setdefault("checkoutMobileLink", payload.get("checkoutMobileLink"))
+            shipments = cart.get("shipments")
+            if not cart.get("branchId") and isinstance(shipments, list) and shipments:
+                first = shipments[0]
+                if isinstance(first, dict) and first.get("branchId"):
+                    cart["branchId"] = first["branchId"]
+            calculation = cart.get("calculation")
+            if isinstance(calculation, dict):
+                if isinstance(calculation.get("validations"), list):
+                    cart["validations"] = calculation["validations"]
+                totals = cart.get("totals")
+                if not isinstance(totals, dict) or not totals.get("totalPrice"):
+                    delivery = calculation.get("delivery") or {}
+                    cart["totals"] = {
+                        "totalPrice": calculation.get("total", 0.0),
+                        "itemsPrice": calculation.get("subTotal", 0.0),
+                        "deliveryPrice": delivery.get("total", 0.0) if isinstance(delivery, dict) else 0.0,
+                        "discount": calculation.get("subDiscount", 0.0),
+                    }
+            payload = cart
+        else:
+            payload = self._unwrap_payload(payload, "cart")
         return self._validate(payload, SilpoCart)
 
     async def add_or_update_cart_products(
@@ -768,11 +805,19 @@ class SilpoClient:
         payload = await self.call_tool(SilpoTool.UPDATE_SHOPPING_CART, args)
         return self._validate(payload, CartUpdateResult)
 
-    async def add_or_update_certificates(self, cart_id: str, certificate_ids: list[str]) -> CartUpdateResult:
-        """Add or remove gift certificates from the cart."""
+    async def add_or_update_certificates(
+        self, cart_id: str, certificate_ids: list[str | dict[str, Any]]
+    ) -> CartUpdateResult:
+        """Add or remove gift certificates from the cart.
+
+        Entries are certificate barcodes (plain strings) or
+        ``{"barcode": ..., "pincode": ...}`` dicts; strings are sent through
+        as ``{"barcode": ...}`` per the live schema.
+        """
+        to_add = [{"barcode": c} if isinstance(c, str) else c for c in certificate_ids]
         payload = await self.call_tool(
             SilpoTool.ADD_OR_UPDATE_CERTIFICATES,
-            {"shoppingCartId": cart_id, "certificatesToAdd": certificate_ids, "certificatesToRemove": []},
+            {"shoppingCartId": cart_id, "certificatesToAdd": to_add, "certificatesToRemove": []},
         )
         return self._validate(payload, CartUpdateResult)
 
@@ -859,8 +904,12 @@ class SilpoClient:
         payload = self._unwrap_payload(payload, "coupons")
         return self._validate(payload, Coupon, many=True)
 
-    async def get_coupon_details(self, business_coupon_id: int | str) -> CouponDetail:
-        """Full coupon info: conditions, products, barcode."""
+    async def get_coupon_details(self, business_coupon_id: int | float | str) -> CouponDetail:
+        """Full coupon info: eligibility, conditions, reward, progress.
+
+        Check ``can_be_applied_to_order`` for eligibility — it requires both
+        the user toggle (``active``) and the lifecycle ``state`` to allow use.
+        """
         payload = await self.call_tool(SilpoTool.GET_COUPON_DETAILS, {"businessCouponId": business_coupon_id})
         payload = self._unwrap_payload(payload, "coupon")
         return self._validate(payload, CouponDetail)
@@ -877,9 +926,14 @@ class SilpoClient:
         payload = self._unwrap_payload(payload, "promoCodes")
         return self._validate(payload, PromoCode, many=True)
 
-    async def get_certificates(self) -> list[Certificate]:
+    async def get_certificates(self, limit: int | None = None, offset: int | None = None) -> list[Certificate]:
         """Active gift certificates."""
-        payload = await self.call_tool(SilpoTool.GET_MY_CERTIFICATES, {})
+        args: dict[str, Any] = {}
+        if limit is not None:
+            args["limit"] = limit
+        if offset is not None:
+            args["offset"] = offset
+        payload = await self.call_tool(SilpoTool.GET_MY_CERTIFICATES, args)
         payload = self._unwrap_payload(payload, "certificates")
         return self._validate(payload, Certificate, many=True)
 

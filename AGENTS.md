@@ -116,22 +116,32 @@ Key design decisions:
   and `client_id` in the body, which the server rejects with "Client must not
   use multiple authentication methods".
 - **All 40 tools are reconciled to the live `tools/list` schemas** (verified
-  live, Sep 2026; re-verified Sep 7 2026 — no drift found except the mock's
-  legacy `cartId` alias on `silpo_get_shopping_cart_by_id` /
-  `silpo_clear_shopping_cart`, now removed so both take only `shoppingCartId`). The mock exposes exactly the live argument names and the
+  live, Sep 2026; re-verified Sep 7 2026; reconciled with server
+  release-1.110.0 on Sep 10 2026 — no drift in tool names, arg names or
+  required sets). The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
   the live schema requires them; cart tools take `shoppingCartId`;
   `silpo_add_or_update_cart_products` takes `products`;
   `silpo_find_products_batch` takes `products` as a list of strings;
   `silpo_add_or_update_favorite_products` takes `actions`
-  (`[{productId, externalProductId, toDelete}]`). Use `examples/real_smoke.py`
+  (`[{productId, externalProductId, toDelete}]`);
+  `silpo_add_or_update_certificates` takes `certificatesToAdd`/
+  `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
+  strings are converted client-side). `DeliveryType` covers all 16 live enum
+  values. Use `examples/real_smoke.py`
   to re-dump the live schemas after server updates.
-- **Response shapes are reconciled too** (verified live, Sep 2026). Every live
+- **Response shapes are reconciled too** (verified live, Sep 10 2026, against
+  real data for every group). Every live
   response is wrapped in `{success, summary, <data>, meta?}`; the typed
-  methods unwrap it via `_unwrap_payload`. Models accept both the live field
-  names (`id`/`name`/`start`/`end`/`deliveryType`/`available`) and the
-  documented/mock ones via `AliasChoices`, so the mock's documented fixtures
+  methods unwrap it via `_unwrap_payload` (lists and dicts alike).
+  Coupon eligibility comes from `canBeAppliedToOrder` on
+  `silpo_get_coupon_details` (requires both `active` and `state="Активний"`);
+  the live cart nests products under `shipments[].products`, sums under
+  `calculation` (incl. `validations`), and loyalty/checkout links at the top
+  level — `get_cart_by_id` maps those onto `SilpoCart`. Models accept both
+  the live field names (`id`/`name`/`start`/`end`/`deliveryType`/`available`)
+  and the documented/mock ones via `AliasChoices`, so the mock's fixtures
   keep validating. `find_products_batch` (`queries` → `results`) and
   `get_products` (`products` + `meta.total`) are normalized client-side.
 - Real tool responses come back as FastMCP `Root` dataclasses; `_extract_payload`

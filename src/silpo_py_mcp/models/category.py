@@ -16,6 +16,7 @@ class Category(SilpoModel):
     parent_id: str | None = Field(default=None, alias="parentId")
     product_count: int = Field(default=0, alias="productCount")
     image_url: str | None = Field(default=None, alias="imageUrl")
+    url: str | None = None
 
 
 class CategoryNode(SilpoModel):

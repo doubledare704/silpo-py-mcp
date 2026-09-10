@@ -71,6 +71,7 @@ from silpo_py_mcp.models import (
     Certificate,
     Coupon,
     CouponDetail,
+    CouponProgress,
     CreateShoppingCartResult,
     DeliveryAddress,
     DeliveryType,
@@ -81,7 +82,9 @@ from silpo_py_mcp.models import (
     NovaPoshtaOffice,
     NovaPoshtaSettlement,
     OfflineReceipt,
+    OfflineReceiptItem,
     OnlineOrder,
+    OnlineOrderItem,
     OrderLine,
     PremiumSubscription,
     ProductBatchItem,
@@ -96,11 +99,12 @@ from silpo_py_mcp.models import (
     SilpoCart,
     SilpoModel,
     SilpoProduct,
+    SubscriptionFeature,
     TimeSlot,
 )
 from silpo_py_mcp.tools import SilpoTool
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 __all__ = [
     "SILPO_MCP_URL",
@@ -122,6 +126,7 @@ __all__ = [
     "Certificate",
     "Coupon",
     "CouponDetail",
+    "CouponProgress",
     "CreateShoppingCartResult",
     "DeliveryAddress",
     "DeliveryType",
@@ -133,7 +138,9 @@ __all__ = [
     "NovaPoshtaOffice",
     "NovaPoshtaSettlement",
     "OfflineReceipt",
+    "OfflineReceiptItem",
     "OnlineOrder",
+    "OnlineOrderItem",
     "OrderLine",
     "PremiumSubscription",
     "ProductBatchItem",
@@ -161,6 +168,7 @@ __all__ = [
     "SilpoToolExecutionError",
     "SilpoToolNotFoundError",
     "SilpoValidationError",
+    "SubscriptionFeature",
     "TimeSlot",
     "__version__",
     "auth",

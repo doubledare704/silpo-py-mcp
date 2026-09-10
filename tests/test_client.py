@@ -68,7 +68,8 @@ async def test_product_search_group(client: SilpoClient) -> None:
     assert "nonexistent" in batch.unmatched
 
     details = await client.get_product_details("bran-1", "moloko-premiya-25-900-ml", "DeliveryHome", TS, TE)
-    assert details.composition
+    assert details.url
+    assert details.attributes
 
     similar = await client.get_similar_products("bran-1", "moloko-premiya-25-900-ml")
     assert len(similar) == 2
@@ -126,7 +127,7 @@ async def test_cart_mutation_wire_args(client: SilpoClient) -> None:
     }
     assert by_name["silpo_add_or_update_certificates"] == {
         "shoppingCartId": cart_id,
-        "certificatesToAdd": ["cert-1"],
+        "certificatesToAdd": [{"barcode": "cert-1"}],
         "certificatesToRemove": [],
     }
 
@@ -234,19 +235,22 @@ async def test_orders_profile_loyalty_groups(client: SilpoClient) -> None:
     assert addresses[0].address_id
 
     family = await client.get_family()
-    assert family[0].member_type == "child"
+    assert family[0].name == "Софія"
+    assert any(member.its_me for member in family)
 
     restrictions = await client.get_food_restrictions()
-    assert "безлактозна дієта" in restrictions.restrictions
+    assert "lactose-free" in restrictions.restrictions
 
     loyalty: LoyaltyInfo = await client.get_loyalty_info()
     assert loyalty.bonus_balance == 125.5
 
     coupons: list[Coupon] = await client.get_coupons()
-    assert coupons[0].barcode
+    assert coupons[0].reward_value == 50.0
 
-    coupon = await client.get_coupon_details("cup-1")
-    assert coupon.conditions
+    coupon = await client.get_coupon_details(520703581)
+    assert coupon.can_be_applied_to_order is True
+    assert coupon.business_coupon_id == 520703581
+    assert coupon.state == "Активний"
 
     promos = await client.get_promos()
     assert promos[0].promo_id
@@ -255,7 +259,30 @@ async def test_orders_profile_loyalty_groups(client: SilpoClient) -> None:
     assert promo_codes[0].code == "SUMMER2026"
 
     certificates = await client.get_certificates()
-    assert certificates[0].nominal == 200.0
+    assert certificates[0].total_price == 200.0
 
     premium = await client.get_premium_subscription()
-    assert premium.is_active
+    assert premium.status == "active"
+    assert premium.web_link
+
+
+async def test_certificates_accept_barcode_dicts(client: SilpoClient) -> None:
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+
+    result = await client.add_or_update_certificates(cart_id, [{"barcode": "4820000000002", "pincode": "1234"}])
+    assert result.added == [{"barcode": "4820000000002", "faceValue": None, "validations": []}]
+    assert result.removed == []
+
+
+async def test_category_children_map_to_subcategories(client: SilpoClient) -> None:
+    detail = await client.get_category("bran-1", "DeliveryHome", "molochni")
+    assert detail.category.slug == "molochni"
+    assert [c.slug for c in detail.subcategories] == ["yaytsya"]
+
+
+async def test_online_order_live_shape(client: SilpoClient) -> None:
+    online = await client.get_online_orders()
+    assert online[0].total_price == 245.5
+    assert online[0].items[0].title == "Молоко Премія 2.5% 900 мл"
