@@ -101,6 +101,7 @@ def test_product_accepts_live_shape_with_null_company() -> None:
             "name": "Печиво",
             "slug": "pechyvo-1",
             "price": 63.99,
+            "displayPrice": 63.99,
             "oldPrice": None,
             "stock": 2.0,
             "available": True,
@@ -116,6 +117,7 @@ def test_product_accepts_live_shape_with_null_company() -> None:
     )
     assert product.display_ratio == "0,3кг"
     assert product.company_id is None
+    assert product.display_price == 63.99
 
 
 def test_coupon_detail_live_shape() -> None:

@@ -30,9 +30,16 @@ async def test_mock_get_products_filters(mock_server: SilpoMockServer) -> None:
         result = await client.call_tool("silpo_get_products", {**ctx, "category": "Молочні продукти"})
         assert result.data["total"] == 2
         assert result.data["items"][0]["productId"] == "prd-milk-2pct"
+        assert result.data["items"][0]["displayPrice"] == 36.9
 
         in_stock = await client.call_tool("silpo_get_products", {**ctx, "inStock": True})
         assert in_stock.data["total"] == 4
+
+        priced = await client.call_tool(
+            "silpo_get_products", {**ctx, "category": "Молочні продукти", "fromPrice": 30.0, "toPrice": 40.0}
+        )
+        assert priced.data["total"] == 1
+        assert priced.data["items"][0]["productId"] == "prd-milk-2pct"
 
 
 async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
@@ -137,3 +144,70 @@ async def test_mock_create_shopping_cart_is_idempotent(mock_server: SilpoMockSer
         )
         assert fetched.data["branchId"] == "bran-1"
         assert fetched.data["deliveryType"] == "DeliveryHome"
+
+
+async def test_mock_find_products_batch_skips_empty(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        ctx = {
+            "branchId": "bran-1",
+            "deliveryType": "DeliveryHome",
+            "timeslotStart": "2026-09-06T10:00:00+03:00",
+            "timeslotEnd": "2026-09-06T11:00:00+03:00",
+        }
+        mixed = await client.call_tool(
+            "silpo_find_products_batch", {**ctx, "products": ["молоко", "", "   "], "limit": 2}
+        )
+        assert mixed.data["meta"]["droppedCount"] == 2
+        assert mixed.data["meta"]["totalQueries"] == 1
+        assert mixed.data["queries"][0]["query"] == "молоко"
+        assert "totalFound" in mixed.data["queries"][0]
+
+        all_empty = await client.call_tool("silpo_find_products_batch", {**ctx, "products": ["   "]})
+        assert all_empty.data["success"] is True
+        assert all_empty.data["queries"] == []
+        assert all_empty.data["meta"]["droppedCount"] == 1
+
+        by_article = await client.call_tool("silpo_find_products_batch", {**ctx, "products": ["100001"]})
+        assert by_article.data["queries"][0]["totalFound"] == 1
+        assert by_article.data["queries"][0]["products"][0]["productId"] == "prd-milk-2pct"
+
+
+async def test_mock_product_details_has_new_fields(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool(
+            "silpo_get_product_details",
+            {
+                "branchId": "bran-1",
+                "slug": "moloko-premiya-25-900-ml",
+                "deliveryType": "DeliveryHome",
+                "timeslotStart": "2026-09-06T10:00:00+03:00",
+                "timeslotEnd": "2026-09-06T11:00:00+03:00",
+            },
+        )
+        assert result.data["displayPrice"] == 36.9
+        assert result.data["image"]
+        assert result.data["externalProductId"] == 100001
+        assert result.data["weighted"] is False
+
+
+async def test_mock_similar_products_requires_timeslot(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        tools = {t.name: t for t in await client.list_tools()}
+        required = set(tools["silpo_get_similar_products"].inputSchema.get("required", []))
+        assert {"branchId", "slug", "deliveryType", "timeslotStart", "timeslotEnd"} <= required
+
+        result = await client.call_tool(
+            "silpo_get_similar_products",
+            {
+                "branchId": "bran-1",
+                "slug": "moloko-premiya-25-900-ml",
+                "deliveryType": "DeliveryHome",
+                "timeslotStart": "2026-09-06T10:00:00+03:00",
+                "timeslotEnd": "2026-09-06T11:00:00+03:00",
+                "limit": 2,
+            },
+        )
+        assert len(result.data) == 2

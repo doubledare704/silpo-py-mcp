@@ -118,10 +118,13 @@ Key design decisions:
 - **All 40 tools are reconciled to the live `tools/list` schemas** (verified
   live, Sep 2026; re-verified Sep 7 2026; reconciled with server
   release-1.110.0 on Sep 10 2026 — no drift in tool names, arg names or
-  required sets). The mock exposes exactly the live argument names and the
+  required sets; reconciled with server release-1.110.1 on Sep 11 2026).
+  The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
-  the live schema requires them; cart tools take `shoppingCartId`;
+  the live schema requires them — since 1.110.1 this includes
+  `silpo_get_similar_products` (breaking: `deliveryType`/`timeslotStart`/
+  `timeslotEnd` are now required for accurate stock); cart tools take `shoppingCartId`;
   `silpo_add_or_update_cart_products` takes `products`;
   `silpo_find_products_batch` takes `products` as a list of strings;
   `silpo_add_or_update_favorite_products` takes `actions`
@@ -132,7 +135,8 @@ Key design decisions:
   values. Use `examples/real_smoke.py`
   to re-dump the live schemas after server updates.
 - **Response shapes are reconciled too** (verified live, Sep 10 2026, against
-  real data for every group). Every live
+  real data for every group; product shapes re-verified Sep 11 2026 for
+  release-1.110.1). Every live
   response is wrapped in `{success, summary, <data>, meta?}`; the typed
   methods unwrap it via `_unwrap_payload` (lists and dicts alike).
   Coupon eligibility comes from `canBeAppliedToOrder` on
@@ -144,6 +148,10 @@ Key design decisions:
   and the documented/mock ones via `AliasChoices`, so the mock's fixtures
   keep validating. `find_products_batch` (`queries` → `results`) and
   `get_products` (`products` + `meta.total`) are normalized client-side.
+  Product results carry `displayPrice` (`fromPrice`/`toPrice` filter by it);
+  `get_product_details` carries `displayPrice`/`image`/`specialPrices`/
+  `externalProductId`; batch `meta.droppedCount` surfaces as
+  `BatchProductResult.dropped_count`.
 - Real tool responses come back as FastMCP `Root` dataclasses; `_extract_payload`
   unwraps them via `dataclasses.asdict` so `call_tool` returns plain JSON.
 - Server quirks observed live: `silpo_get_category` declares an output schema

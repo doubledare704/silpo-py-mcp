@@ -66,13 +66,18 @@ async def test_product_search_group(client: SilpoClient) -> None:
     )
     assert "молоко" in batch.results
     assert "nonexistent" in batch.unmatched
+    assert batch.dropped_count == 0
 
     details = await client.get_product_details("bran-1", "moloko-premiya-25-900-ml", "DeliveryHome", TS, TE)
     assert details.url
     assert details.attributes
+    assert details.display_price == 36.9
+    assert details.image
+    assert details.external_product_id == 100001
 
-    similar = await client.get_similar_products("bran-1", "moloko-premiya-25-900-ml")
+    similar = await client.get_similar_products("bran-1", "moloko-premiya-25-900-ml", "DeliveryHome", TS, TE)
     assert len(similar) == 2
+    assert similar[0].display_price is not None
 
     await client.update_favorites([{"productId": "prd-bread", "externalProductId": 0, "toDelete": False}])
     favorites = await client.get_favorites("bran-1", "DeliveryHome", TS)
@@ -286,3 +291,26 @@ async def test_online_order_live_shape(client: SilpoClient) -> None:
     online = await client.get_online_orders()
     assert online[0].total_price == 245.5
     assert online[0].items[0].title == "Молоко Премія 2.5% 900 мл"
+
+
+async def test_find_products_batch_skips_empty_entries(client: SilpoClient) -> None:
+    batch = await client.find_products_batch("bran-1", "DeliveryHome", TS, TE, ["молоко", "", "   ", "хліб"])
+    assert batch.dropped_count == 2
+    assert "молоко" in batch.results or "хліб" in batch.results
+
+    empty = await client.find_products_batch("bran-1", "DeliveryHome", TS, TE, ["   "])
+    assert empty.results == {}
+    assert empty.unmatched == []
+    assert empty.dropped_count == 1
+
+
+async def test_get_products_price_filters_use_display_price(client: SilpoClient) -> None:
+    result = await client.get_products(
+        "bran-1", "DeliveryHome", TS, TE, category="Молочні продукти", from_price=30.0, to_price=40.0
+    )
+    assert result.total == 1
+    assert result.items[0].product_id == "prd-milk-2pct"
+    assert result.items[0].display_price == 36.9
+
+    wide = await client.get_products("bran-1", "DeliveryHome", TS, TE, category="Молочні продукти")
+    assert all(item.display_price is not None for item in wide.items)

@@ -16,6 +16,11 @@ class SilpoProduct(SilpoModel):
     ``displayRatio``/``specialPrices``, nullable ``companyId``/``branchId``)
     and the mock/documented shape (``productId``/``title``/``isOnSale``/
     ``isPrivateLabel``/``category``).
+
+    ``display_price`` (release-1.110.1) is the per-display-unit price the
+    server filters ``fromPrice``/``toPrice`` by — it equals ``price`` for
+    unit-counted products but can differ significantly for weighted ones
+    (e.g. ``price=88.11``/``displayPrice=8.81``).
     """
 
     product_id: str = Field(validation_alias=AliasChoices("productId", "id"), description="Silpo product identifier.")
@@ -25,6 +30,7 @@ class SilpoProduct(SilpoModel):
     slug: str | None = None
     brand: str | None = None
     price: float
+    display_price: float | None = Field(default=None, validation_alias=AliasChoices("displayPrice", "display_price"))
     old_price: float | None = Field(default=None, alias="oldPrice")
     is_on_sale: bool = Field(default=False, alias="isOnSale")
     is_private_label: bool = Field(default=False, alias="isPrivateLabel", description="ВТМ (Премія / Повна Чаша).")
@@ -44,8 +50,10 @@ class SilpoProduct(SilpoModel):
 class ProductDetail(SilpoModel):
     """Full product card from ``silpo_get_product_details``.
 
-    Live shape: identity (``id``/``name``/``slug``), pricing, stock,
-    ``displayRatio``/``url``/``images``/``attributes``. The legacy
+    Live shape: identity (``id``/``name``/``slug``), pricing (``price``/
+    ``displayPrice``), stock, ``displayRatio``/``url``/``image``/``images``/
+    ``attributes``. ``weighted`` is derived server-side from ``ratio``
+    (``"кг"`` = weighted) when the upstream API omits the flag. The legacy
     ``description``/``composition``/``nutritionalValue`` fields are kept for
     backward compatibility with older fixtures.
     """
@@ -56,6 +64,7 @@ class ProductDetail(SilpoModel):
     title: str | None = Field(default=None, validation_alias=AliasChoices("title", "name"))
     slug: str | None = None
     price: float | None = None
+    display_price: float | None = Field(default=None, validation_alias=AliasChoices("displayPrice", "display_price"))
     old_price: float | None = Field(default=None, alias="oldPrice")
     stock: float | None = None
     is_available: bool | None = Field(default=None, validation_alias=AliasChoices("isAvailable", "available"))
@@ -64,7 +73,10 @@ class ProductDetail(SilpoModel):
     ratio: str | None = None
     display_ratio: str | None = Field(default=None, alias="displayRatio")
     url: str | None = None
+    image: str | None = None
     images: list[str] = Field(default_factory=list)
+    special_prices: list[dict[str, Any]] | None = Field(default=None, alias="specialPrices")
+    external_product_id: int | None = Field(default=None, alias="externalProductId")
     attributes: dict[str, Any] = Field(default_factory=dict)
     description: str | None = None
     composition: list[str] = Field(default_factory=list)
@@ -95,10 +107,17 @@ class ProductMatch(SilpoModel):
 
 
 class BatchProductResult(SilpoModel):
-    """Result of ``silpo_find_products_batch``: query -> matches."""
+    """Result of ``silpo_find_products_batch``: query -> matches.
+
+    ``dropped_count`` mirrors the live ``meta.droppedCount`` — the number of
+    empty/whitespace-only entries the server skipped rather than searched
+    (release-1.110.1 never errors on those; all-empty input returns
+    ``success:true`` with an empty ``queries`` array).
+    """
 
     results: dict[str, list[SilpoProduct]]
     unmatched: list[str] = Field(default_factory=list)
+    dropped_count: int = Field(default=0, alias="droppedCount")
 
 
 class ProductSet(SilpoModel):

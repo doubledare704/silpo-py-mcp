@@ -542,7 +542,14 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
     if state.get("slug"):
         await check(
             "silpo_get_similar_products",
-            {"branchId": state["branchId"], "slug": state["slug"], "deliveryType": state["deliveryType"], "limit": 5},
+            {
+                "branchId": state["branchId"],
+                "slug": state["slug"],
+                "deliveryType": state["deliveryType"],
+                "timeslotStart": state["timeslotStart"],
+                "timeslotEnd": state["timeslotEnd"],
+                "limit": 5,
+            },
             retries=1,
         )
 

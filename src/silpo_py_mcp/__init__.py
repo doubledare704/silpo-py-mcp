@@ -104,7 +104,7 @@ from silpo_py_mcp.models import (
 )
 from silpo_py_mcp.tools import SilpoTool
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "SILPO_MCP_URL",

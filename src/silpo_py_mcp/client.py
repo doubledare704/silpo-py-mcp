@@ -391,7 +391,16 @@ class SilpoClient:
         queries: list[str],
         limit: int | None = None,
     ) -> BatchProductResult:
-        """Search up to 30 products in parallel from a shopping list."""
+        """Search up to 30 products in parallel from a shopping list.
+
+        Empty strings and whitespace-only entries are silently skipped by the
+        server (see ``dropped_count``) — all-empty input still returns
+        ``success:true`` with empty results, never an error. Terms also accept
+        exact numeric article codes (``externalProductId``); prefer those over
+        fuzzy names when known. Each ``queries[]`` entry reports ``totalFound``
+        (real match count, which can exceed the returned ``products`` when
+        ``limit`` is smaller).
+        """
         args: dict[str, Any] = {
             "branchId": branch_id,
             "deliveryType": delivery_type,
@@ -402,6 +411,11 @@ class SilpoClient:
         if limit is not None:
             args["limit"] = limit
         payload = await self.call_tool(SilpoTool.FIND_PRODUCTS_BATCH, args)
+        dropped_count = 0
+        if isinstance(payload, dict):
+            meta = payload.get("meta")
+            if isinstance(meta, dict) and isinstance(meta.get("droppedCount"), (int, float)):
+                dropped_count = int(meta["droppedCount"])
         if isinstance(payload, dict) and isinstance(payload.get("queries"), list):
             results: dict[str, Any] = {}
             unmatched: list[str] = []
@@ -412,7 +426,7 @@ class SilpoClient:
                     results[query] = matches
                 elif query:
                     unmatched.append(query)
-            payload = {"results": results, "unmatched": unmatched}
+            payload = {"results": results, "unmatched": unmatched, "droppedCount": dropped_count}
         return self._validate(payload, BatchProductResult)
 
     async def get_products(
@@ -437,9 +451,17 @@ class SilpoClient:
         """Products with filters: category, promotion, stock, price, pagination.
 
         At least one of ``category``/``must_have_promotion``/``promotion_code``/
-        ``product_set`` is required by the server. Sort order caveat: the API
-        sorts in-stock and out-of-stock products independently within each
-        group, so set ``in_stock=True`` for a single continuously-sorted list.
+        ``product_set`` is required by the server. ``from_price``/``to_price``
+        filter by ``displayPrice``, not ``price`` — they are equal for
+        unit-counted products but can differ significantly for weighted ones
+        (e.g. ``price=88.11``/``displayPrice=8.81``); to enforce a budget on
+        the amount actually paid, filter the returned items by ``price``
+        client-side instead. Sort order caveat: the API sorts within two
+        independent groupings — in-stock before out-of-stock (set
+        ``in_stock=True`` to drop the second group) and, within each of those,
+        unit-counted (``weighted:false``) before weighted (``weighted:true``)
+        regardless of ``sort_direction``. Never assume the first/last item on
+        a page is the true min/max price.
         """
         args: dict[str, Any] = {
             "branchId": branch_id,
@@ -491,7 +513,12 @@ class SilpoClient:
         timeslot_start: str,
         timeslot_end: str,
     ) -> ProductDetail:
-        """Full product card: price, stock, images, attributes, package size."""
+        """Full product card: price, stock, images, attributes, package size.
+
+        ``image`` is a single thumbnail while ``images`` is the full gallery.
+        ``weighted`` is derived server-side from ``ratio`` when the upstream
+        API omits the flag, keeping it consistent with search results.
+        """
         payload = await self.call_tool(
             SilpoTool.GET_PRODUCT_DETAILS,
             {
@@ -509,19 +536,31 @@ class SilpoClient:
         self,
         branch_id: str,
         slug: str,
+        delivery_type: str,
+        timeslot_start: str,
+        timeslot_end: str,
         *,
         limit: int | None = None,
         offset: int | None = None,
-        delivery_type: str | None = None,
     ) -> list[SilpoProduct]:
-        """Similar/alternative products by slug."""
-        args: dict[str, Any] = {"branchId": branch_id, "slug": slug}
+        """Similar/alternative products by slug.
+
+        ``delivery_type``/``timeslot_start``/``timeslot_end`` are required
+        (release-1.110.1): without them the upstream API falls back to a
+        stale stock computation that can disagree with
+        ``get_product_details`` for the same product.
+        """
+        args: dict[str, Any] = {
+            "branchId": branch_id,
+            "slug": slug,
+            "deliveryType": delivery_type,
+            "timeslotStart": timeslot_start,
+            "timeslotEnd": timeslot_end,
+        }
         if limit is not None:
             args["limit"] = limit
         if offset is not None:
             args["offset"] = offset
-        if delivery_type is not None:
-            args["deliveryType"] = delivery_type
         payload = await self.call_tool(SilpoTool.GET_SIMILAR_PRODUCTS, args)
         payload = self._unwrap_payload(payload, "products")
         return self._validate(payload, SilpoProduct, many=True)
@@ -547,6 +586,7 @@ class SilpoClient:
             SilpoTool.GET_MY_FAVORITES,
             {"branchId": branch_id, "deliveryType": delivery_type, "timeslotStart": timeslot_start},
         )
+        payload = self._unwrap_payload(payload, "products")
         return self._validate(payload, SilpoProduct, many=True)
 
     async def update_favorites(self, actions: list[dict[str, Any]]) -> dict[str, Any]:

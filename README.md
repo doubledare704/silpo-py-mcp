@@ -91,13 +91,20 @@ asyncio.run(main())
 > **Note on typed methods vs the real server.** The typed methods and the mock
 > mirror the live `tools/list` schemas and response shapes (verified Sep 2026;
 > re-verified Sep 7 2026; reconciled with server release-1.110.0 on Sep 10
-> 2026). Context arguments such as
+> 2026; reconciled with server release-1.110.1 on Sep 11 2026). Context
+> arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
-> the live schema requires them, cart tools take `shoppingCartId`, and
+> the live schema requires them — since 1.110.1 this includes
+> `silpo_get_similar_products` — cart tools take `shoppingCartId`, and
 > `silpo_add_or_update_cart_products` takes `products`.
 > `silpo_add_or_update_certificates` takes `certificatesToAdd`/
 > `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
-> strings are converted automatically). Coupon eligibility comes from
+> strings are converted automatically). Product results carry `displayPrice`
+> (`fromPrice`/`toPrice` filter by it, not by `price`);
+> `get_product_details` carries `displayPrice`/`image`/`specialPrices`/
+> `externalProductId`; batch empty entries are skipped
+> (`meta.droppedCount` → `BatchProductResult.dropped_count`). Coupon
+> eligibility comes from
 > `canBeAppliedToOrder` on `silpo_get_coupon_details` — never infer it from
 > `active`/`state` alone. The mock cart tools
 > (`silpo_get_shopping_cart_by_id`, `silpo_clear_shopping_cart`, ...) accept
@@ -194,7 +201,7 @@ updating; `call_tool` keeps working.
 
 ```bash
 uv sync                  # install deps
-uv run pytest            # run tests (39 tests, all against the in-memory mock)
+uv run pytest            # run tests (all against the in-memory mock)
 uv run ruff format .     # format
 uv run ruff check .      # lint
 uv run pyrefly check     # type check (strict)

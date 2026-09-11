@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.0 — 2026-09-11
+
+Reconciled with server release-1.110.1 and re-verified all 40 tools against
+the live `tools/list` schemas plus live responses with real data. No drift in
+tool names except the one breaking change below; no new tools.
+
+This is a **breaking release**: `get_similar_products` now requires the
+delivery timeslot.
+
+### Added
+
+- `SilpoProduct.display_price` (`displayPrice`) on every product-returning
+  tool (`find_products_batch`, `get_products`, `get_similar_products`,
+  `get_replacements`); `fromPrice`/`toPrice` filter by it, not by `price`.
+- `ProductDetail` now exposes the release-1.110.1 fields `displayPrice`,
+  `image` (thumbnail alongside `images`), `specialPrices` and
+  `externalProductId`.
+- `BatchProductResult.dropped_count` mirrors the live `meta.droppedCount`
+  (empty/whitespace-only batch entries are skipped, never an error).
+- Mock `silpo_find_products_batch` returns the live shape (`queries[]` with
+  `totalFound` + `meta` with `totalQueries`/`totalProducts`/`droppedCount`)
+  and matches numeric article codes (`externalProductId`) like the server.
+
+### Changed (breaking)
+
+- `get_similar_products` takes `delivery_type`/`timeslot_start`/`timeslot_end`
+  as required positional args (live schema now requires them for accurate
+  stock); the mock tool requires them too. Calls without a timeslot now fail
+  server-side with `-32602`.
+- `get_products` docstring documents the upstream (non-fixable) sort-ordering:
+  in-stock before out-of-stock, and within each group unit-counted before
+  weighted regardless of `sortDirection`; plus the `displayPrice` vs `price`
+  distinction for `fromPrice`/`toPrice`.
+- Mock `silpo_get_products` price filters compare `displayPrice` (falling back
+  to `price`), matching the fixed server behavior.
+
+### Fixed
+
+- `get_favorites` unwraps the live `{success, summary, products, meta}`
+  envelope (previously only the mock's bare list validated).
+- Mock `silpo_get_product_details` returns the full live product card
+  (`displayPrice`, `image`, `specialPrices`, `externalProductId`, correct
+  `weighted`).
+
 ## 0.4.0 — 2026-09-10
 
 Reconciled with server release-1.110.0 and re-verified all 40 tools against

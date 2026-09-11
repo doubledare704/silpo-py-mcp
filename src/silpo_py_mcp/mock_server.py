@@ -57,6 +57,7 @@ PRODUCTS: list[dict[str, Any]] = [
         "slug": "moloko-premiya-25-900-ml",
         "brand": "Премія",
         "price": 36.9,
+        "displayPrice": 36.9,
         "oldPrice": None,
         "isOnSale": False,
         "isPrivateLabel": True,
@@ -79,6 +80,7 @@ PRODUCTS: list[dict[str, Any]] = [
         "slug": "hleb-ukrainskyi-nariznyi",
         "brand": "Київхліб",
         "price": 28.5,
+        "displayPrice": 28.5,
         "oldPrice": None,
         "isOnSale": False,
         "isPrivateLabel": False,
@@ -101,6 +103,7 @@ PRODUCTS: list[dict[str, Any]] = [
         "slug": "yaytsya-kuryachi-s1-10-sht",
         "brand": "Ясенсвіт",
         "price": 54.9,
+        "displayPrice": 54.9,
         "oldPrice": 62.0,
         "isOnSale": True,
         "isPrivateLabel": False,
@@ -123,6 +126,7 @@ PRODUCTS: list[dict[str, Any]] = [
         "slug": "syr-gauda-45-250-g",
         "brand": "Сир",
         "price": 89.0,
+        "displayPrice": 89.0,
         "oldPrice": 110.0,
         "isOnSale": True,
         "isPrivateLabel": False,
@@ -145,6 +149,7 @@ PRODUCTS: list[dict[str, Any]] = [
         "slug": "yabluka-gala-1-kg",
         "brand": "Фрукти",
         "price": 42.0,
+        "displayPrice": 42.0,
         "oldPrice": None,
         "isOnSale": False,
         "isPrivateLabel": False,
@@ -485,17 +490,47 @@ class SilpoMockServer:
         ) -> dict[str, Any]:
             """Search up to 30 products in parallel by list of shopping items."""
             _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
-            results: dict[str, Any] = {"results": {}, "unmatched": []}
-            for query in products:
+            dropped = sum(1 for q in products if not q.strip())
+            valid = [q for q in products if q.strip()]
+            queries: list[dict[str, Any]] = []
+            total_products = 0
+            for query in valid:
                 lim = limit or 1
+                stripped = query.strip()
                 matches = [
-                    p for p in PRODUCTS if query.lower() in p["title"].lower() or query.lower() in p["category"].lower()
+                    p
+                    for p in PRODUCTS
+                    if stripped.lower() in p["title"].lower()
+                    or stripped.lower() in p["category"].lower()
+                    or stripped == str(p.get("externalProductId"))
                 ]
-                if matches:
-                    results["results"][query] = matches[:lim]
-                else:
-                    results["unmatched"].append(query)
-            return results
+                total_found = len(matches)
+                chosen = matches[:lim]
+                total_products += len(chosen)
+                queries.append({"query": query, "totalFound": total_found, "products": chosen})
+            if dropped:
+                summary = (
+                    f"Found {total_products} products across {len(queries)} search queries "
+                    f"({dropped} empty/whitespace-only entries skipped)"
+                    if queries
+                    else f"No valid product names provided — all {dropped} entry was empty or whitespace-only"
+                    if dropped == 1
+                    else f"No valid product names provided — all {dropped} entries were empty or whitespace-only"
+                )
+            elif not queries:
+                summary = "No products specified."
+            else:
+                summary = f"Found {total_products} products across {len(queries)} search queries"
+            return {
+                "success": True,
+                "summary": summary,
+                "queries": queries,
+                "meta": {
+                    "totalQueries": len(queries),
+                    "totalProducts": total_products,
+                    "droppedCount": dropped,
+                },
+            }
 
         @self._fastmcp.tool
         def silpo_get_products(
@@ -531,9 +566,9 @@ class SilpoMockServer:
             if mustHavePromotion is not None:
                 items = [p for p in items if p["isOnSale"] == mustHavePromotion]
             if fromPrice is not None:
-                items = [p for p in items if p["price"] >= fromPrice]
+                items = [p for p in items if float(p.get("displayPrice") or p["price"]) >= fromPrice]
             if toPrice is not None:
-                items = [p for p in items if p["price"] <= toPrice]
+                items = [p for p in items if float(p.get("displayPrice") or p["price"]) <= toPrice]
             start = (page - 1) * pageSize
             return {
                 "items": items[start : start + pageSize],
@@ -561,30 +596,36 @@ class SilpoMockServer:
                 "name": product["title"],
                 "slug": product["slug"],
                 "price": product["price"],
+                "displayPrice": product.get("displayPrice", product["price"]),
                 "oldPrice": product["oldPrice"],
                 "stock": product.get("stock", 10.0),
                 "available": product["isAvailable"],
+                "image": product.get("imageUrl"),
                 "weighted": product.get("weighted", False),
                 "step": product.get("step", 1.0),
                 "ratio": product.get("unit", "шт"),
                 "displayRatio": product.get("displayRatio"),
+                "specialPrices": product.get("specialPrices"),
+                "companyId": product["companyId"],
+                "branchId": product["branchId"],
+                "externalProductId": product.get("externalProductId"),
                 "url": f"https://silpo.ua/product/{product['slug']}",
                 "images": [product["imageUrl"]],
                 "attributes": {"brand": product["brand"]},
-                "companyId": product["companyId"],
-                "branchId": product["branchId"],
             }
 
         @self._fastmcp.tool
         def silpo_get_similar_products(
             branchId: str,
             slug: str,
+            deliveryType: str,
+            timeslotStart: str,
+            timeslotEnd: str,
             limit: int | None = None,
             offset: int | None = None,
-            deliveryType: str | None = None,
         ) -> list[dict[str, Any]]:
             """Similar/alternative products by slug."""
-            _ = (branchId, deliveryType, limit, offset)
+            _ = (branchId, deliveryType, timeslotStart, timeslotEnd, limit, offset)
             source = next((p for p in PRODUCTS if p["slug"] == slug), None)
             if source is None:
                 return []
