@@ -453,7 +453,18 @@ class SilpoMockServer:
                     "end": f"2026-09-02T0{i + 10}:00:00Z",
                     "price": 0.0 if i == 0 else 45.0,
                     "deliveryCost": 0.0 if i == 0 else 45.0,
+                    "deliveryCostMap": [
+                        {"cost": 0.0 if i == 0 else 45.0, "fromOrderCost": 199.0},
+                    ],
                     "minOrderCost": 199.0,
+                    "maxWeight": None,
+                    "constraints": {
+                        "isLimitedAlcohol": False,
+                        "isLimitedTobacco": False,
+                        "isLimitedCookedFood": False,
+                        "isLimitedOwnCooking": False,
+                    },
+                    "fast": {"cost": 0.0, "time": 30} if i == 0 else None,
                     "isAvailable": True,
                     "available": True,
                     "isExpress": i == 0,
@@ -869,6 +880,11 @@ class SilpoMockServer:
                 if product is None:
                     raise ValueError(f"Product not found: {incoming['productId']}")
                 quantity = float(incoming.get("quantity", 1))
+                existing = next((i for i in cart["items"] if i["productId"] == product["productId"]), None)
+                if existing is not None:
+                    if incoming.get("addQuantity"):
+                        quantity = float(existing.get("quantity", 0.0)) + quantity
+                    cart["items"].remove(existing)
                 line = {
                     "productId": product["productId"],
                     "companyId": product["companyId"],
@@ -879,9 +895,8 @@ class SilpoMockServer:
                     "totalPrice": round(product["price"] * quantity, 2),
                     "isAvailable": product["isAvailable"],
                 }
-                existing = next((i for i in cart["items"] if i["productId"] == product["productId"]), None)
-                if existing is not None:
-                    cart["items"].remove(existing)
+                if incoming.get("comment") is not None:
+                    line["comment"] = incoming["comment"]
                 cart["items"].append(line)
             self._recompute_totals(cart)
             return {"cart": cart, "changed": True}

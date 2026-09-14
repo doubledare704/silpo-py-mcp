@@ -91,12 +91,16 @@ asyncio.run(main())
 > **Note on typed methods vs the real server.** The typed methods and the mock
 > mirror the live `tools/list` schemas and response shapes (verified Sep 2026;
 > re-verified Sep 7 2026; reconciled with server release-1.110.0 on Sep 10
-> 2026; reconciled with server release-1.110.1 on Sep 11 2026). Context
+> 2026; reconciled with server release-1.110.1 on Sep 11 2026;
+> re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
+> changes). Context
 > arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them — since 1.110.1 this includes
 > `silpo_get_similar_products` — cart tools take `shoppingCartId`, and
-> `silpo_add_or_update_cart_products` takes `products`.
+> `silpo_add_or_update_cart_products` takes `products`
+> (`[{productId, companyId, branchId, quantity, addQuantity?, comment?}]` —
+> omitted/false `addQuantity` replaces the quantity, `true` adds to it).
 > `silpo_add_or_update_certificates` takes `certificatesToAdd`/
 > `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
 > strings are converted automatically). Product results carry `displayPrice`

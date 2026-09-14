@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.1 — 2026-09-14
+
+Re-verified all 40 tools against the live `tools/list` schemas plus live
+responses with real data. No drift in tool names, top-level argument names or
+required sets; one additive input change below. All typed read-only methods
+validate against the live responses (the pre-existing `silpo_get_my_favorites`
+server bug — `Cannot read properties of null (reading 'id')` — still stands).
+
+### Added
+
+- `silpo_add_or_update_cart_products` products items accept the live optional
+  `addQuantity` (boolean) and `comment` (string) fields: omitted/false
+  `addQuantity` replaces the quantity, `true` adds to it (verified live).
+  `CartLineInput` exposes both; `add_or_update_cart_products` accepts
+  `list[CartLineInput | dict]` (dicts still pass through verbatim).
+- Mock `silpo_add_or_update_cart_products` implements the live
+  replace-vs-add semantics and stores per-line `comment`.
+- Mock `silpo_get_time_slots` returns the full live slot shape
+  (`deliveryCostMap`, `maxWeight`, `constraints`, `fast`).
+
+### Fixed
+
+- Removed the stale `silpo_get_category` output-schema quirk note: the live
+  schema now declares the `id` field it returns.
+
 ## 0.5.0 — 2026-09-11
 
 Reconciled with server release-1.110.1 and re-verified all 40 tools against

@@ -42,6 +42,7 @@ from silpo_py_mcp.models import (
     AvailableDeliveryType,
     BatchProductResult,
     Branch,
+    CartLineInput,
     CartSummary,
     CartUpdateResult,
     CategoriesTree,
@@ -782,15 +783,25 @@ class SilpoClient:
     async def add_or_update_cart_products(
         self,
         cart_id: str,
-        products: list[dict[str, Any]],
+        products: list[CartLineInput | dict[str, Any]],
     ) -> CartUpdateResult:
         """Add products or update quantities in the cart.
 
         ``products`` entries need ``productId`` + ``companyId`` + ``branchId``
-        (as returned by product search) plus a ``quantity``.
+        (as returned by product search) plus a ``quantity``. Dict entries are
+        sent verbatim; ``CartLineInput`` entries are serialized with aliases.
+
+        Quantity semantics (live): if ``addQuantity`` is omitted or false the
+        quantity you send becomes the new total (replace); set
+        ``addQuantity: true`` to increase the existing quantity by the given
+        amount. ``comment`` carries per-line special instructions.
         """
+        lines: list[dict[str, Any]] = [
+            entry.model_dump(by_alias=True, exclude_none=True) if isinstance(entry, CartLineInput) else entry
+            for entry in products
+        ]
         payload = await self.call_tool(
-            SilpoTool.ADD_OR_UPDATE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": products}
+            SilpoTool.ADD_OR_UPDATE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": lines}
         )
         return self._validate(payload, CartUpdateResult)
 

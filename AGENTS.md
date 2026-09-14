@@ -118,14 +118,18 @@ Key design decisions:
 - **All 40 tools are reconciled to the live `tools/list` schemas** (verified
   live, Sep 2026; re-verified Sep 7 2026; reconciled with server
   release-1.110.0 on Sep 10 2026 — no drift in tool names, arg names or
-  required sets; reconciled with server release-1.110.1 on Sep 11 2026).
+  required sets; reconciled with server release-1.110.1 on Sep 11 2026;
+  re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
+  changes; one additive change below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
   the live schema requires them — since 1.110.1 this includes
   `silpo_get_similar_products` (breaking: `deliveryType`/`timeslotStart`/
   `timeslotEnd` are now required for accurate stock); cart tools take `shoppingCartId`;
-  `silpo_add_or_update_cart_products` takes `products`;
+  `silpo_add_or_update_cart_products` takes `products`
+  (`[{productId, companyId, branchId, quantity, addQuantity?, comment?}]` —
+  omitted/false `addQuantity` replaces the quantity, `true` adds to it);
   `silpo_find_products_batch` takes `products` as a list of strings;
   `silpo_add_or_update_favorite_products` takes `actions`
   (`[{productId, externalProductId, toDelete}]`);
@@ -154,6 +158,7 @@ Key design decisions:
   `BatchProductResult.dropped_count`.
 - Real tool responses come back as FastMCP `Root` dataclasses; `_extract_payload`
   unwraps them via `dataclasses.asdict` so `call_tool` returns plain JSON.
-- Server quirks observed live: `silpo_get_category` declares an output schema
-  that forbids the `id` field it actually returns (fastmcp rejects it);
-  `silpo_get_my_certificates` sometimes returns HTTP 500.
+- Server quirks observed live: `silpo_get_my_certificates` sometimes returns
+  HTTP 500; `silpo_get_my_favorites` fails server-side with
+  `Cannot read properties of null (reading 'id')` for a corrupted favorites
+  entry (pre-existing, unrelated to the client).

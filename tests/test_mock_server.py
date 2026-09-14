@@ -66,6 +66,53 @@ async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
         assert clear.data["cart"]["totals"]["totalPrice"] == 0.0
 
 
+async def test_mock_cart_add_quantity_replace_vs_add(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        summary = await client.call_tool("silpo_get_my_shopping_cart", {})
+        cart_id = summary.data["cartId"]
+
+        await client.call_tool(
+            "silpo_add_or_update_cart_products",
+            {
+                "shoppingCartId": cart_id,
+                "products": [{"productId": "prd-milk-2pct", "quantity": 1}],
+            },
+        )
+        replaced = await client.call_tool(
+            "silpo_add_or_update_cart_products",
+            {
+                "shoppingCartId": cart_id,
+                "products": [{"productId": "prd-milk-2pct", "quantity": 2}],
+            },
+        )
+        assert replaced.data["cart"]["items"][0]["quantity"] == 2
+
+        added = await client.call_tool(
+            "silpo_add_or_update_cart_products",
+            {
+                "shoppingCartId": cart_id,
+                "products": [{"productId": "prd-milk-2pct", "quantity": 2, "addQuantity": True}],
+            },
+        )
+        assert added.data["cart"]["items"][0]["quantity"] == 4
+
+
+async def test_mock_time_slots_match_live_output_shape(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool(
+            "silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": ["DeliveryHome"]}
+        )
+        slot = result.data[0]
+        assert slot["start"] and slot["end"]
+        assert slot["available"] is True
+        assert slot["deliveryCostMap"][0]["fromOrderCost"] == 199.0
+        assert slot["minOrderCost"] == 199.0
+        assert slot["constraints"]["isLimitedAlcohol"] is False
+        assert slot["fast"] == {"cost": 0.0, "time": 30}
+
+
 async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:

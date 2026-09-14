@@ -9,6 +9,7 @@ from silpo_py_mcp import SilpoClient
 from silpo_py_mcp.models import (
     Address,
     BatchProductResult,
+    CartLineInput,
     CartSummary,
     CartUpdateResult,
     Category,
@@ -135,6 +136,67 @@ async def test_cart_mutation_wire_args(client: SilpoClient) -> None:
         "certificatesToAdd": [{"barcode": "cert-1"}],
         "certificatesToRemove": [],
     }
+
+
+async def test_cart_add_quantity_and_comment_wire_args(client: SilpoClient) -> None:
+    """addQuantity/comment from the live schema must pass through verbatim."""
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append((str(name), dict(arguments)))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+
+    await client.add_or_update_cart_products(
+        cart_id,
+        [
+            {
+                "productId": "prd-milk-2pct",
+                "companyId": "co-1",
+                "branchId": "bran-1",
+                "quantity": 1,
+                "addQuantity": False,
+                "comment": "без пакета",
+            }
+        ],
+    )
+    await client.add_or_update_cart_products(
+        cart_id,
+        [
+            CartLineInput(
+                productId="prd-milk-2pct",
+                companyId="co-1",
+                branchId="bran-1",
+                quantity=2,
+                addQuantity=True,
+            )
+        ],
+    )
+
+    by_name = {name: args for name, args in captured}
+    assert by_name["silpo_add_or_update_cart_products"] == {
+        "shoppingCartId": cart_id,
+        "products": [
+            {
+                "productId": "prd-milk-2pct",
+                "companyId": "co-1",
+                "branchId": "bran-1",
+                "quantity": 2,
+                "addQuantity": True,
+            }
+        ],
+    }
+
+    fetched: SilpoCart = await client.get_cart_by_id(cart_id)
+    line = next(item for item in fetched.items if item.product_id == "prd-milk-2pct")
+    assert line.quantity == 1 + 2
 
 
 async def test_full_cart_workflow(client: SilpoClient) -> None:

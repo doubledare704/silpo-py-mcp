@@ -125,6 +125,8 @@ class CartLineInput(SilpoModel):
     company_id: str = Field(alias="companyId")
     branch_id: str = Field(alias="branchId")
     quantity: float = 1.0
+    add_quantity: bool | None = Field(default=None, alias="addQuantity")
+    comment: str | None = None
 
 
 class CartUpdateResult(SilpoModel):
