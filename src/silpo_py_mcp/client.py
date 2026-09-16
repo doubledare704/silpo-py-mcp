@@ -514,7 +514,13 @@ class SilpoClient:
         timeslot_start: str,
         timeslot_end: str,
     ) -> ProductDetail:
-        """Full product card: price, stock, images, attributes, package size.
+        """Full product card: branch-real price/stock, images, attributes, package size.
+
+        Since server release-1.110.0 ``price``/``displayPrice``/``stock``/
+        ``available`` are the requested branch's real offer, not catalog-wide
+        data. Always check ``has_offer_at_branch`` first: when ``False`` the
+        product has no real offer at ``branch_id`` (treat it as unavailable
+        there, even if ``price`` is still populated for reference).
 
         ``image`` is a single thumbnail while ``images`` is the full gallery.
         ``weighted`` is derived server-side from ``ratio`` when the upstream

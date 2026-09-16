@@ -597,11 +597,19 @@ class SilpoMockServer:
             timeslotStart: str,
             timeslotEnd: str,
         ) -> dict[str, Any]:
-            """Full product card: price, stock, images, attributes."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
+            """Full product card: branch-real price/stock plus hasOfferAtBranch.
+
+            Mirrors server release-1.110.0: pricing reflects the requested
+            branch's real offer, and ``hasOfferAtBranch`` is False when the
+            product has no offer at that branch (then ``stock`` is 0 and
+            ``available`` is False; ``price``/``displayPrice`` fall back to
+            the catalog values for reference).
+            """
+            _ = (deliveryType, timeslotStart, timeslotEnd)
             product = next((p for p in PRODUCTS if p["slug"] == slug), None)
             if product is None:
                 raise ValueError(f"Product not found: {slug}")
+            has_offer = product["branchId"] == branchId
             return {
                 "id": product["productId"],
                 "name": product["title"],
@@ -609,8 +617,9 @@ class SilpoMockServer:
                 "price": product["price"],
                 "displayPrice": product.get("displayPrice", product["price"]),
                 "oldPrice": product["oldPrice"],
-                "stock": product.get("stock", 10.0),
-                "available": product["isAvailable"],
+                "stock": product.get("stock", 10.0) if has_offer else 0.0,
+                "available": product["isAvailable"] if has_offer else False,
+                "hasOfferAtBranch": has_offer,
                 "image": product.get("imageUrl"),
                 "weighted": product.get("weighted", False),
                 "step": product.get("step", 1.0),
@@ -618,7 +627,7 @@ class SilpoMockServer:
                 "displayRatio": product.get("displayRatio"),
                 "specialPrices": product.get("specialPrices"),
                 "companyId": product["companyId"],
-                "branchId": product["branchId"],
+                "branchId": branchId,
                 "externalProductId": product.get("externalProductId"),
                 "url": f"https://silpo.ua/product/{product['slug']}",
                 "images": [product["imageUrl"]],
@@ -1164,7 +1173,7 @@ class SilpoMockServer:
             ]
 
         @self._fastmcp.tool
-        def silpo_get_coupon_details(businessCouponId: int | float) -> dict[str, Any]:
+        def silpo_get_coupon_details(businessCouponId: int | float | str) -> dict[str, Any]:
             """Full coupon info: eligibility, conditions, reward, progress."""
             _ = businessCouponId  # mock returns the fixture coupon for any id
             return {

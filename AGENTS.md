@@ -120,7 +120,8 @@ Key design decisions:
   release-1.110.0 on Sep 10 2026 — no drift in tool names, arg names or
   required sets; reconciled with server release-1.110.1 on Sep 11 2026;
   re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
-  changes; one additive change below).
+  changes; plus the release-1.110.0 `silpo_get_product_details` output fix
+  below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
@@ -156,6 +157,14 @@ Key design decisions:
   `get_product_details` carries `displayPrice`/`image`/`specialPrices`/
   `externalProductId`; batch `meta.droppedCount` surfaces as
   `BatchProductResult.dropped_count`.
+- **Release-1.110.0 `silpo_get_product_details` fix.** The server no longer
+  returns stale catalog-wide `displayPrice`/`price` — pricing and
+  availability are the requested branch's real offer, with an explicit
+  `hasOfferAtBranch` flag (`False` = no real offer at that branch).
+  `ProductDetail`/`SilpoProduct` expose it as `has_offer_at_branch`; the mock
+  echoes the requested `branchId` and returns `stock=0`/`available=False`
+  when the flag is `False`. `get_product_details` docstring tells callers to
+  check the flag first. `examples/real_smoke.py` logs the live flag.
 - Real tool responses come back as FastMCP `Root` dataclasses; `_extract_payload`
   unwraps them via `dataclasses.asdict` so `call_tool` returns plain JSON.
 - Server quirks observed live: `silpo_get_my_certificates` sometimes returns

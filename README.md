@@ -106,7 +106,10 @@ asyncio.run(main())
 > strings are converted automatically). Product results carry `displayPrice`
 > (`fromPrice`/`toPrice` filter by it, not by `price`);
 > `get_product_details` carries `displayPrice`/`image`/`specialPrices`/
-> `externalProductId`; batch empty entries are skipped
+> `externalProductId` plus `hasOfferAtBranch` (release-1.110.0: `price`/
+> `displayPrice`/`stock`/`available` are the requested branch's real offer —
+> check `has_offer_at_branch` first, `False` means no real offer at that
+> branch); batch empty entries are skipped
 > (`meta.droppedCount` → `BatchProductResult.dropped_count`). Coupon
 > eligibility comes from
 > `canBeAppliedToOrder` on `silpo_get_coupon_details` — never infer it from

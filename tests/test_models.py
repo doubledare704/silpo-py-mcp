@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from silpo_py_mcp.models import (
     CouponDetail,
+    ProductDetail,
     SilpoCart,
     SilpoProduct,
     TimeSlot,
@@ -158,3 +159,36 @@ def test_cart_defaults() -> None:
     )
     assert cart.validations == []
     assert cart.items == []
+
+
+def test_product_detail_has_offer_at_branch() -> None:
+    detail = ProductDetail.model_validate(
+        {
+            "id": "prd-milk-2pct",
+            "name": "Молоко",
+            "slug": "moloko",
+            "price": 36.9,
+            "displayPrice": 36.9,
+            "stock": 10.0,
+            "available": True,
+            "hasOfferAtBranch": True,
+            "branchId": "bran-1",
+        }
+    )
+    assert detail.has_offer_at_branch is True
+
+    missing = ProductDetail.model_validate(
+        {
+            "id": "prd-milk-2pct",
+            "name": "Молоко",
+            "slug": "moloko",
+            "price": 36.9,
+            "displayPrice": 36.9,
+            "stock": 0.0,
+            "available": False,
+            "hasOfferAtBranch": False,
+            "branchId": "bran-2",
+        }
+    )
+    assert missing.has_offer_at_branch is False
+    assert missing.is_available is False

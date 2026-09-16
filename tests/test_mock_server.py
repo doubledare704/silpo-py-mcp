@@ -237,6 +237,27 @@ async def test_mock_product_details_has_new_fields(mock_server: SilpoMockServer)
         assert result.data["image"]
         assert result.data["externalProductId"] == 100001
         assert result.data["weighted"] is False
+        assert result.data["hasOfferAtBranch"] is True
+        assert result.data["branchId"] == "bran-1"
+
+
+async def test_mock_product_details_flags_missing_branch_offer(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool(
+            "silpo_get_product_details",
+            {
+                "branchId": "bran-2",
+                "slug": "moloko-premiya-25-900-ml",
+                "deliveryType": "DeliveryHome",
+                "timeslotStart": "2026-09-06T10:00:00+03:00",
+                "timeslotEnd": "2026-09-06T11:00:00+03:00",
+            },
+        )
+        assert result.data["hasOfferAtBranch"] is False
+        assert result.data["branchId"] == "bran-2"
+        assert result.data["available"] is False
+        assert result.data["stock"] == 0.0
 
 
 async def test_mock_similar_products_requires_timeslot(mock_server: SilpoMockServer) -> None:

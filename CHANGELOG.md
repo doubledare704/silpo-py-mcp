@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.2 — 2026-09-16
+
+Reconciled with server release-1.110.0 `silpo_get_product_details` output
+fix: the server no longer returns stale catalog-wide `displayPrice`/`price`
+— pricing and availability are the requested branch's real offer, with an
+explicit `hasOfferAtBranch` flag (`False` = no real offer at that branch).
+No drift in tool names, argument names or required sets (still 40 tools);
+`silpo_get_coupon_details` mock now also accepts string ids like the typed
+method.
+
+### Added
+
+- `ProductDetail.has_offer_at_branch` (`hasOfferAtBranch`) and the same
+  optional field on `SilpoProduct` for forward compatibility. `examples/
+  real_smoke.py` logs the live flag after the `silpo_get_product_details`
+  battery call.
+
+### Changed
+
+- Mock `silpo_get_product_details` is branch-aware: it echoes the requested
+  `branchId` and returns that branch's real `stock`/`available` with
+  `hasOfferAtBranch: true`; for any other branch it returns
+  `hasOfferAtBranch: false` with `stock=0`/`available=False` (catalog
+  `price`/`displayPrice` kept for reference).
+- `get_product_details` docstring tells callers to check
+  `has_offer_at_branch` first.
+
 ## 0.5.1 — 2026-09-14
 
 Re-verified all 40 tools against the live `tools/list` schemas plus live

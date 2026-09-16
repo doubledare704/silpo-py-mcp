@@ -35,6 +35,11 @@ class SilpoProduct(SilpoModel):
     is_on_sale: bool = Field(default=False, alias="isOnSale")
     is_private_label: bool = Field(default=False, alias="isPrivateLabel", description="ВТМ (Премія / Повна Чаша).")
     is_available: bool = Field(default=True, validation_alias=AliasChoices("isAvailable", "available"))
+    has_offer_at_branch: bool | None = Field(
+        default=None,
+        alias="hasOfferAtBranch",
+        description="release-1.110.0: False when the product has no real offer at the requested branch.",
+    )
     category: str | None = None
     image_url: str | None = Field(default=None, validation_alias=AliasChoices("imageUrl", "image"))
     unit: str | None = None
@@ -56,6 +61,13 @@ class ProductDetail(SilpoModel):
     (``"кг"`` = weighted) when the upstream API omits the flag. The legacy
     ``description``/``composition``/``nutritionalValue`` fields are kept for
     backward compatibility with older fixtures.
+
+    Since server release-1.110.0 ``price``/``displayPrice``/``stock``/
+    ``available`` are the requested branch's real offer — not catalog-wide
+    data — and ``has_offer_at_branch`` explicitly signals whether such an
+    offer exists. Always check it first: when ``False`` the product has no
+    real offer at that branch (mock returns ``stock=0``/``available=False``
+    with the catalog price for reference).
     """
 
     product_id: str | None = Field(default=None, validation_alias=AliasChoices("productId", "id"))
@@ -68,6 +80,7 @@ class ProductDetail(SilpoModel):
     old_price: float | None = Field(default=None, alias="oldPrice")
     stock: float | None = None
     is_available: bool | None = Field(default=None, validation_alias=AliasChoices("isAvailable", "available"))
+    has_offer_at_branch: bool | None = Field(default=None, alias="hasOfferAtBranch")
     weighted: bool | None = None
     step: float | None = None
     ratio: str | None = None

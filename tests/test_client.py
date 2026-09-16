@@ -75,6 +75,13 @@ async def test_product_search_group(client: SilpoClient) -> None:
     assert details.display_price == 36.9
     assert details.image
     assert details.external_product_id == 100001
+    assert details.has_offer_at_branch is True
+    assert details.branch_id == "bran-1"
+
+    no_offer = await client.get_product_details("bran-2", "moloko-premiya-25-900-ml", "DeliveryHome", TS, TE)
+    assert no_offer.has_offer_at_branch is False
+    assert no_offer.branch_id == "bran-2"
+    assert no_offer.is_available is False
 
     similar = await client.get_similar_products("bran-1", "moloko-premiya-25-900-ml", "DeliveryHome", TS, TE)
     assert len(similar) == 2

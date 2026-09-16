@@ -528,7 +528,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         state.setdefault("externalProductId", 911018)
 
     if state.get("slug"):
-        await check(
+        details_payload = await check(
             "silpo_get_product_details",
             {
                 "branchId": state["branchId"],
@@ -539,6 +539,12 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
             },
             retries=1,
         )
+        if isinstance(details_payload, dict):
+            product = details_payload.get("product", details_payload)
+            if isinstance(product, dict) and "hasOfferAtBranch" in product:
+                print(f"  · hasOfferAtBranch={product['hasOfferAtBranch']} for slug={state['slug']}")
+            else:
+                print("  · note: live silpo_get_product_details has no hasOfferAtBranch (pre-1.110.0?)")
     if state.get("slug"):
         await check(
             "silpo_get_similar_products",
