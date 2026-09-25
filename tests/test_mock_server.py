@@ -32,14 +32,35 @@ async def test_mock_get_products_filters(mock_server: SilpoMockServer) -> None:
         assert result.data["items"][0]["productId"] == "prd-milk-2pct"
         assert result.data["items"][0]["displayPrice"] == 36.9
 
-        in_stock = await client.call_tool("silpo_get_products", {**ctx, "inStock": True})
-        assert in_stock.data["total"] == 4
+        in_stock = await client.call_tool(
+            "silpo_get_products", {**ctx, "category": "Молочні продукти", "inStock": True}
+        )
+        assert in_stock.data["total"] == 2
 
         priced = await client.call_tool(
             "silpo_get_products", {**ctx, "category": "Молочні продукти", "fromPrice": 30.0, "toPrice": 40.0}
         )
         assert priced.data["total"] == 1
         assert priced.data["items"][0]["productId"] == "prd-milk-2pct"
+
+
+async def test_mock_get_products_requires_filter(mock_server: SilpoMockServer) -> None:
+    """release-1.111.0: no filter returns a clear message (not a raw 400)."""
+    import pytest
+    from fastmcp.exceptions import ToolError
+
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        ctx = {
+            "branchId": "bran-1",
+            "deliveryType": "DeliveryHome",
+            "timeslotStart": "2026-09-06T10:00:00+03:00",
+            "timeslotEnd": "2026-09-06T11:00:00+03:00",
+        }
+        with pytest.raises(ToolError, match=r"category.*mustHavePromotion.*promotionCode.*set"):
+            await client.call_tool("silpo_get_products", {**ctx, "limit": 5})
+        with pytest.raises(ToolError, match=r"category.*mustHavePromotion.*promotionCode.*set"):
+            await client.call_tool("silpo_get_products", {**ctx, "inStock": True})
 
 
 async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
@@ -111,6 +132,64 @@ async def test_mock_time_slots_match_live_output_shape(mock_server: SilpoMockSer
         assert slot["minOrderCost"] == 199.0
         assert slot["constraints"]["isLimitedAlcohol"] is False
         assert slot["fast"] == {"cost": 0.0, "time": 30}
+        assert slot["serviceFee"] == 0.0
+
+        pickup = await client.call_tool("silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": ["SelfPickup"]})
+        assert pickup.data[0]["serviceFee"] == 15.0
+
+
+async def test_mock_time_slots_accepts_singular_delivery_type(mock_server: SilpoMockServer) -> None:
+    """release-1.111.0: singular deliveryType accepted as alias for deliveryTypes."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        plural = await client.call_tool("silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": ["SelfPickup"]})
+        singular = await client.call_tool("silpo_get_time_slots", {"branchId": "bran-1", "deliveryType": "SelfPickup"})
+        assert singular.data[0]["deliveryType"] == "SelfPickup"
+        assert len(singular.data) == len(plural.data) == 3
+        ids = [s["id"] for s in singular.data]
+        assert len(set(ids)) == 3
+
+
+async def test_mock_time_slots_accepts_millisecond_timestamps(mock_server: SilpoMockServer) -> None:
+    """release-1.111.1: millisecond timestamps (Date#toISOString) are accepted."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool(
+            "silpo_get_time_slots",
+            {
+                "branchId": "bran-1",
+                "deliveryTypes": ["DeliveryHome"],
+                "start": "2026-09-02T10:00:00.123Z",
+                "end": "2026-09-02T12:00:00.000Z",
+            },
+        )
+        assert len(result.data) == 3
+
+
+async def test_mock_find_address_flags_unmatched_house(mock_server: SilpoMockServer) -> None:
+    """release-1.111.1: unmatched house number is flagged, not a silent success."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        matched = await client.call_tool("silpo_find_address", {"address": "Київ, вул. Анни Ахматової, 9"})
+        addr = matched.data["addresses"][0]
+        assert addr["houseNumberMatched"] is True
+        assert addr["warning"] is None
+
+        unmatched = await client.call_tool("silpo_find_address", {"address": "Київ, вул. Хрещатик, 999999"})
+        flagged = unmatched.data["addresses"][0]
+        assert flagged["houseNumberMatched"] is False
+        assert flagged["warning"]
+
+
+async def test_mock_cart_carries_service_fee(mock_server: SilpoMockServer) -> None:
+    """release-1.111.1: cart carries serviceFee (SelfPickup Сервісний збір)."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        summary = await client.call_tool("silpo_get_my_shopping_cart", {})
+        cart_id = summary.data["cartId"]
+        fetched = await client.call_tool("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id})
+        assert fetched.data["serviceFee"] == 0.0
+        assert fetched.data["totals"]["serviceFee"] == 0.0
 
 
 async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:

@@ -29,6 +29,7 @@ class CartTotals(SilpoModel):
     items_price: float = Field(default=0.0, alias="itemsPrice")
     delivery_price: float = Field(default=0.0, alias="deliveryPrice")
     discount: float = Field(default=0.0)
+    service_fee: float | None = Field(default=None, alias="serviceFee")
     bonuses_to_apply: float = Field(default=0.0, alias="bonusesToApply")
 
 
@@ -72,7 +73,9 @@ class SilpoCart(SilpoModel):
     The mock returns ``items``/``totals``/``branchId`` at the top level; the
     live server nests products under ``shipments[].products`` and sums under
     ``calculation`` (see ``SilpoClient.get_cart_by_id``, which maps those onto
-    ``branch_id``/``totals``/``validations``).
+    ``branch_id``/``totals``/``validations``). Since server release-1.111.1
+    the cart carries ``serviceFee`` — the SelfPickup "Сервісний збір" fee
+    previously folded into the total with no line item.
     """
 
     cart_id: str = Field(default="", validation_alias=AliasChoices("cartId", "id"))
@@ -84,6 +87,7 @@ class SilpoCart(SilpoModel):
     shipments: list[dict[str, Any]] = Field(default_factory=list)
     calculation: dict[str, Any] | None = None
     totals: CartTotals = Field(default_factory=CartTotals)
+    service_fee: float | None = Field(default=None, alias="serviceFee")
     loyalty: CartLoyalty = Field(default_factory=CartLoyalty)
     validations: list[CartValidation] = Field(default_factory=list)
     checkout_web_link: str | None = Field(default=None, alias="checkoutWebLink")

@@ -18,7 +18,13 @@ class GeoPoint(SilpoModel):
 
 
 class Address(SilpoModel):
-    """A resolved street address returned by the Silpo API."""
+    """A resolved street address returned by the Silpo API.
+
+    Since server release-1.111.1 an unmatched house number no longer returns
+    a silent ``success: true`` — the response flags it via ``warning``/
+    ``houseNumberMatched``. Always check ``warning`` (or
+    ``house_number_matched is False``) before geocoding-dependent calls.
+    """
 
     address: str = ""
     city: str | None = None
@@ -27,6 +33,15 @@ class Address(SilpoModel):
     district: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    warning: str | None = Field(
+        default=None,
+        description="release-1.111.1: set when the house number could not be matched.",
+    )
+    house_number_matched: bool | None = Field(
+        default=None,
+        alias="houseNumberMatched",
+        description="release-1.111.1: False when the house number is unmatched.",
+    )
 
     @property
     def text(self) -> str:
@@ -129,7 +144,12 @@ class Branch(SilpoModel):
 
 
 class TimeSlot(SilpoModel):
-    """A delivery time slot."""
+    """A delivery time slot.
+
+    Since server release-1.111.1 slots carry ``serviceFee`` — the SelfPickup
+    "Сервісний збір" fee previously folded into the cart total with no line
+    item (0 for home-delivery slots).
+    """
 
     id: str = ""
     delivery_type: DeliveryType = Field(alias="deliveryType")
@@ -140,6 +160,7 @@ class TimeSlot(SilpoModel):
     is_available: bool = Field(default=True, validation_alias=AliasChoices("isAvailable", "available"))
     is_express: bool = Field(default=False, alias="isExpress")
     delivery_cost: float | None = Field(default=None, alias="deliveryCost")
+    service_fee: float | None = Field(default=None, alias="serviceFee")
     delivery_cost_map: list[dict[str, Any]] | None = Field(default=None, alias="deliveryCostMap")
     min_order_cost: float | None = Field(default=None, alias="minOrderCost")
     max_weight: float | None = Field(default=None, alias="maxWeight")

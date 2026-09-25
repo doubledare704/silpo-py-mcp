@@ -17,6 +17,7 @@ against both the mock and the real server.
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, ClassVar
 
@@ -344,7 +345,9 @@ class SilpoMockServer:
                     "itemsPrice": 0.0,
                     "deliveryPrice": 0.0,
                     "discount": 0.0,
+                    "serviceFee": 0.0,
                 },
+                "serviceFee": 0.0,
                 "loyalty": {
                     "isEnabled": True,
                     "bonusAvailable": 125.5,
@@ -357,6 +360,11 @@ class SilpoMockServer:
             }
             carts[session_key] = cartId
         return cartId
+
+    @staticmethod
+    def _service_fee_for(delivery_type: str) -> float:
+        """SelfPickup "Сервісний збір" fee (release-1.111.1); 0 otherwise."""
+        return 15.0 if delivery_type == "SelfPickup" else 0.0
 
     def _recompute_totals(self, cart: dict[str, Any]) -> None:
         items_price = sum(item["totalPrice"] for item in cart["items"])
@@ -386,15 +394,49 @@ class SilpoMockServer:
     def _register_location_tools(self) -> None:
         @self._fastmcp.tool
         def silpo_find_address(address: str) -> dict[str, Any]:
-            """Find coordinates (lat/lng) for an address string."""
-            return {"success": True, "summary": "Found 1 address", "addresses": FIXTURE_ADDRESSES[:1]}
+            """Find coordinates (lat/lng) for an address string.
+
+            Mirrors server release-1.111.1: an unmatched house number is
+            flagged via ``warning``/``houseNumberMatched`` instead of a
+            silent ``success: true``.
+            """
+            base = dict(FIXTURE_ADDRESSES[0])
+            fixture_house = str(base.get("houseNumber") or "")
+            house_tokens = re.findall(r"\d+[A-Za-zА-Яа-яЁёЇїІіЄєҐґ]*", address)
+            matched = bool(fixture_house) and fixture_house in house_tokens
+            if matched:
+                return {
+                    "success": True,
+                    "summary": "Found 1 address",
+                    "addresses": [{**base, "houseNumberMatched": True, "warning": None}],
+                }
+            return {
+                "success": True,
+                "summary": "Found 1 address with warnings: house number could not be matched",
+                "addresses": [
+                    {
+                        **base,
+                        "houseNumberMatched": False,
+                        "warning": (
+                            "House number could not be matched for "
+                            f"'{address}'; coordinates are for the street, not the house."
+                        ),
+                    }
+                ],
+                "warning": "House number could not be matched; coordinates are approximate.",
+            }
 
         @self._fastmcp.tool
         def silpo_get_available_delivery_types(
             latitude: float,
             longitude: float,
         ) -> list[dict[str, Any]]:
-            """Return available delivery types for coordinates."""
+            """Return available delivery types for coordinates.
+
+            Mirrors server release-1.111.1 docs: coordinates are only
+            validated for home-delivery types — SelfPickup/NovaPoshta options
+            are returned regardless of the coordinate.
+            """
             _ = (latitude, longitude)
             return [
                 {
@@ -435,13 +477,22 @@ class SilpoMockServer:
         def silpo_get_time_slots(
             branchId: str,
             deliveryTypes: list[str] | None = None,
+            deliveryType: str | None = None,
             limit: int | None = None,
             start: str | None = None,
             end: str | None = None,
         ) -> list[dict[str, Any]]:
-            """Return available delivery time slots for a branch."""
+            """Return available delivery time slots for a branch.
+
+            Mirrors server release-1.111.0 (no duplicate slots; singular
+            ``deliveryType`` accepted as an alias for ``deliveryTypes``) and
+            release-1.111.1 (millisecond timestamps accepted; each slot
+            carries ``serviceFee`` — the SelfPickup "Сервісний збір" fee).
+            """
             _ = (limit, start, end)
-            dtype = deliveryTypes[0] if deliveryTypes else "DeliveryHome"
+            types = deliveryTypes or ([deliveryType] if deliveryType else [])
+            dtype = types[0] if types else "DeliveryHome"
+            service_fee = 15.0 if dtype == "SelfPickup" else 0.0
             slots = [
                 {
                     "id": f"slot-{i}",
@@ -468,6 +519,7 @@ class SilpoMockServer:
                     "isAvailable": True,
                     "available": True,
                     "isExpress": i == 0,
+                    "serviceFee": service_fee,
                 }
                 for i in range(3)
             ]
@@ -561,8 +613,16 @@ class SilpoMockServer:
             fromPrice: float | None = None,
             toPrice: float | None = None,
         ) -> dict[str, Any]:
-            """Products with filters: category, promotion, stock, pagination."""
+            """Products with filters: category, promotion, stock, pagination.
+
+            Mirrors server release-1.111.0: at least one of category /
+            mustHavePromotion / promotionCode / set is required (clear message
+            instead of a raw 400). Timeslots are not validated against real
+            delivery windows — a nonexistent slot returns the full catalog.
+            """
             _ = (deliveryType, timeslotStart, timeslotEnd, promotionCode, set, sortBy, sortDirection)
+            if category is None and mustHavePromotion is None and promotionCode is None and set is None:
+                raise ValueError("At least one filter is required: category, mustHavePromotion, promotionCode, set")
             page = 1
             pageSize = limit or 20
             if offset is not None:
@@ -828,6 +888,7 @@ class SilpoMockServer:
                     }
             slot = timeslot
             cart_id = f"cart-{uuid.uuid4().hex[:8]}"
+            fee = self._service_fee_for(deliveryType)
             self._carts[cart_id] = {
                 "cartId": cart_id,
                 "branchId": branchId,
@@ -848,7 +909,9 @@ class SilpoMockServer:
                     "itemsPrice": 0.0,
                     "deliveryPrice": 0.0,
                     "discount": 0.0,
+                    "serviceFee": fee,
                 },
+                "serviceFee": fee,
                 "loyalty": {
                     "isEnabled": True,
                     "bonusAvailable": 125.5,
@@ -869,10 +932,19 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_shopping_cart_by_id(shoppingCartId: str) -> dict[str, Any]:
-            """Return the full cart: items, delivery, slot, sums, validations."""
+            """Return the full cart: items, delivery, slot, sums, validations.
+
+            Mirrors server release-1.111.1: carries ``serviceFee`` (SelfPickup
+            "Сервісний збір" fee).
+            """
             if shoppingCartId not in self._carts:
                 raise ValueError(f"Cart not found: {shoppingCartId}")
-            return self._carts[shoppingCartId]
+            cart = self._carts[shoppingCartId]
+            cart.setdefault("serviceFee", self._service_fee_for(str(cart.get("deliveryType") or "")))
+            totals = cart.get("totals")
+            if isinstance(totals, dict):
+                totals.setdefault("serviceFee", cart["serviceFee"])
+            return cart
 
         @self._fastmcp.tool
         def silpo_add_or_update_cart_products(
@@ -960,6 +1032,10 @@ class SilpoMockServer:
             cart["timeslot"] = timeslot
             cart["address"] = address
             cart["shipments"] = shipments
+            fee = self._service_fee_for(deliveryType)
+            cart["serviceFee"] = fee
+            if isinstance(cart.get("totals"), dict):
+                cart["totals"]["serviceFee"] = fee
             if branchId is not None:
                 cart["branchId"] = branchId
             if promoCode is not None:

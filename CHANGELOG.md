@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.6.0 — 2026-09-25
+
+Reconciled with server release-1.111.0 and release-1.111.1 (5 tools
+affected, still 40 tools, no renames). All typed methods and the mock mirror
+the new server behavior; `examples/real_smoke.py` probes each fix live.
+
+### Added
+
+- `TimeSlot.service_fee` (`serviceFee`) and `SilpoCart.service_fee` /
+  `CartTotals.service_fee` for the release-1.111.1 SelfPickup "Сервісний
+  збір" fee (previously folded into the cart total with no line item).
+  `get_cart_by_id` maps it from the top level or `calculation`; the mock
+  returns `15.0` for `SelfPickup` and `0.0` otherwise.
+- `Address.warning` / `Address.house_number_matched` (`houseNumberMatched`)
+  for the release-1.111.1 `silpo_find_address` flag: unmatched house numbers
+  no longer return a silent `success: true`. `find_address` also surfaces a
+  top-level `warning` onto the returned address; the mock flags any query
+  not containing the fixture house number.
+- Client-side millisecond stripping (`Date#toISOString()`-style
+  `...:00.123Z` stamps) for every timestamp sent to the server
+  (release-1.111.1 strips them upstream in `silpo_get_time_slots`; the
+  client now normalizes too for older servers).
+
+### Changed
+
+- `get_products` raises `ValueError` before sending the request when none of
+  `category`/`must_have_promotion`/`promotion_code`/`product_set` is given,
+  mirroring the release-1.111.0 clear server message (was a raw 400). The
+  mock enforces the same rule. Docstring documents the release-1.111.0
+  timeslot caveat: `timeslotStart`/`timeslotEnd` are not validated against
+  real delivery windows — a nonexistent slot silently returns the full
+  catalog, so always pass a real slot from `get_time_slots`.
+- `get_time_slots` sends the full `deliveryTypes` list (previously only the
+  first entry) and documents the release-1.111.0 singular `deliveryType`
+  alias; the mock accepts both `deliveryTypes` and `deliveryType`.
+- `get_available_delivery_types` docstring clarifies the release-1.111.1
+  correction: coordinates are only validated for home-delivery types —
+  `SelfPickup`/`NovaPoshta` are returned regardless.
+- `examples/real_smoke.py` logs `serviceFee` (slots + cart),
+  `warning`/`houseNumberMatched` (address + unmatched-house probe), probes
+  the singular `deliveryType` alias and millisecond timestamps, and treats
+  the no-filter `get_products` rejection as the expected outcome.
+
 ## 0.5.2 — 2026-09-16
 
 Reconciled with server release-1.110.0 `silpo_get_product_details` output

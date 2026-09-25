@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
+
 from silpo_py_mcp import SilpoClient
 from silpo_py_mcp.models import (
     Address,
@@ -36,6 +38,12 @@ async def test_location_group(client: SilpoClient) -> None:
     address: Address = await client.find_address("Київ, вул. Анни Ахматової, 9")
     assert address.coordinates is not None
     assert address.coordinates.lat == 50.3957
+    assert address.house_number_matched is True
+    assert address.warning is None
+
+    flagged: Address = await client.find_address("Київ, вул. Хрещатик, 999999")
+    assert flagged.house_number_matched is False
+    assert flagged.warning
 
     delivery = await client.get_available_delivery_types(50.0, 30.0)
     assert len(delivery) == 2
@@ -46,6 +54,21 @@ async def test_location_group(client: SilpoClient) -> None:
     slots: list[TimeSlot] = await client.get_time_slots("bran-1", delivery_types=["DeliveryHome"])
     assert len(slots) == 3
     assert slots[0].is_express
+    assert slots[0].service_fee == 0.0
+
+    pickup_slots = await client.get_time_slots("bran-1", delivery_type="SelfPickup")
+    assert pickup_slots[0].service_fee == 15.0
+
+    multi = await client.get_time_slots("bran-1", delivery_types=["DeliveryHome", "SelfPickup"])
+    assert len(multi) == 3
+
+    millis = await client.get_time_slots(
+        "bran-1",
+        delivery_type="DeliveryHome",
+        start="2026-09-02T10:00:00.123Z",
+        end="2026-09-02T12:00:00.000Z",
+    )
+    assert len(millis) == 3
 
     settlements = await client.find_nova_poshta_settlements("Київ")
     assert settlements[0].name == "Київ"
@@ -383,3 +406,54 @@ async def test_get_products_price_filters_use_display_price(client: SilpoClient)
 
     wide = await client.get_products("bran-1", "DeliveryHome", TS, TE, category="Молочні продукти")
     assert all(item.display_price is not None for item in wide.items)
+
+
+async def test_get_products_requires_filter(client: SilpoClient) -> None:
+    """release-1.111.0: missing filter fails fast with the accepted-filter list."""
+    with pytest.raises(ValueError, match=r"category.*mustHavePromotion.*promotionCode.*set"):
+        await client.get_products("bran-1", "DeliveryHome", TS, TE)
+    with pytest.raises(ValueError, match=r"category.*mustHavePromotion.*promotionCode.*set"):
+        await client.get_products("bran-1", "DeliveryHome", TS, TE, in_stock=True, limit=5)
+
+
+async def test_get_products_strips_millisecond_timestamps(client: SilpoClient) -> None:
+    """release-1.111.1: Date#toISOString-style stamps must not break the call."""
+    captured: list[tuple[str, dict[str, Any]]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append((str(name), dict(arguments)))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+    result = await client.get_products(
+        "bran-1",
+        "DeliveryHome",
+        "2026-09-06T10:00:00.123+03:00",
+        "2026-09-06T11:00:00.000+03:00",
+        category="Молочні продукти",
+    )
+    assert result.total == 2
+    by_name = {name: args for name, args in captured}
+    assert by_name["silpo_get_products"]["timeslotStart"] == "2026-09-06T10:00:00+03:00"
+    assert by_name["silpo_get_products"]["timeslotEnd"] == "2026-09-06T11:00:00+03:00"
+
+
+async def test_cart_carries_service_fee(client: SilpoClient) -> None:
+    """release-1.111.1: cart exposes serviceFee (SelfPickup Сервісний збір)."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    fetched: SilpoCart = await client.get_cart_by_id(cart_id)
+    assert fetched.service_fee == 0.0
+
+    updated = await client.update_shopping_cart(
+        cart_id,
+        "SelfPickup",
+        {"start": TS, "end": TE},
+        {"address": "Київ, вул. Центральна"},
+        [],
+    )
+    assert updated.cart.service_fee == 15.0
+    refetched = await client.get_cart_by_id(cart_id)
+    assert refetched.service_fee == 15.0

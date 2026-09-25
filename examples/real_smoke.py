@@ -348,6 +348,10 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 if branch.get("companyId"):
                     state["companyId"] = branch["companyId"]
                 print(f"  · selected slot branch={bid} dtype={dtype} slot={_short(slot)}")
+                if "serviceFee" in slot:
+                    print(f"  · serviceFee={slot.get('serviceFee')} for dtype={dtype}")
+                else:
+                    print("  · note: live silpo_get_time_slots has no serviceFee (pre-1.111.1?)")
                 found_slot = True
                 break
         if found_slot:
@@ -359,6 +363,37 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         state.setdefault("timeslotEnd", "2026-08-23T11:00:00+03:00")
         print(f"  · no available slot, using branchId={state.get('branchId')} with fabricated timeslot")
 
+    if found_slot:
+        # release-1.111.0: singular deliveryType accepted as alias for deliveryTypes
+        alias_payload = await check(
+            "silpo_get_time_slots",
+            {"branchId": state["branchId"], "deliveryType": state["deliveryType"]},
+            retries=1,
+        )
+        if isinstance(alias_payload, dict):
+            alias_slots = (
+                alias_payload.get("slots")
+                or alias_payload.get("timeSlots")
+                or alias_payload.get("deliveryTimeSlots")
+                or []
+            )
+            print(f"  · singular deliveryType alias returned {len(alias_slots)} slots")
+        elif isinstance(alias_payload, list):
+            print(f"  · singular deliveryType alias returned {len(alias_payload)} slots")
+        # release-1.111.1: millisecond timestamps are stripped upstream
+        millis_payload = await check(
+            "silpo_get_time_slots",
+            {
+                "branchId": state["branchId"],
+                "deliveryTypes": [state["deliveryType"]],
+                "start": "2026-09-02T10:00:00.123Z",
+                "end": "2026-09-02T12:00:00.000Z",
+            },
+            retries=1,
+        )
+        if millis_payload is not None:
+            print("  · millisecond timestamps accepted (release-1.111.1 fix present)")
+
     state.setdefault("limit", 5)
     state.setdefault("offset", 0)
     state.setdefault("pageSize", 5)
@@ -367,7 +402,23 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
     state.setdefault("timeslotEnd", "2026-08-23T11:00:00+03:00")
 
     # -- location / delivery (remaining) ----------------------------------
-    await check("silpo_find_address", {"address": state["address"]}, retries=1)
+    address_payload = await check("silpo_find_address", {"address": state["address"]}, retries=1)
+    if isinstance(address_payload, dict):
+        first_addr = (address_payload.get("addresses") or [{}])[0]
+        if first_addr.get("warning") or first_addr.get("houseNumberMatched") is False:
+            print(f"  · address warning: {_short(first_addr.get('warning'))}")
+        elif "warning" in first_addr or "houseNumberMatched" in first_addr:
+            print("  · address house number matched (release-1.111.1 flag present)")
+        else:
+            print("  · note: live silpo_find_address has no warning/houseNumberMatched (pre-1.111.1?)")
+    # release-1.111.1: unmatched house number must be flagged, not silent success
+    unmatched = await check("silpo_find_address", {"address": "Київ, вул. Хрещатик, 999999"}, retries=1)
+    if isinstance(unmatched, dict):
+        first_un = (unmatched.get("addresses") or [{}])[0]
+        print(
+            f"  · unmatched-house probe: houseNumberMatched={first_un.get('houseNumberMatched')} "
+            f"warning={_short(first_un.get('warning'))}"
+        )
     await check(
         "silpo_get_available_delivery_types",
         {"latitude": state["latitude"], "longitude": state["longitude"]},
@@ -473,7 +524,23 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
     )
 
     # -- product search (7) ------------------------------------------------
-    # live get_products requires at least category or set, plain limit returns 400
+    # release-1.111.0: get_products without a filter returns a clear message
+    # listing category/mustHavePromotion/promotionCode/set (was a raw 400)
+    no_filter = await check(
+        "silpo_get_products",
+        {
+            "branchId": state["branchId"],
+            "deliveryType": state["deliveryType"],
+            "timeslotStart": state["timeslotStart"],
+            "timeslotEnd": state["timeslotEnd"],
+            "limit": 5,
+        },
+        retries=0,
+    )
+    if no_filter is None:
+        print("  · no-filter get_products rejected as expected (check message lists accepted filters)")
+    else:
+        print(f"  · note: no-filter get_products unexpectedly succeeded: {_short(no_filter)}")
     prod_category = state.get("category") or state.get("categorySlug") or "shokoladni-figurky-524"
     products = await check(
         "silpo_get_products",
@@ -687,7 +754,13 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         print(f"  · cartId={cart_id}")
 
     if cart_id:
-        await check("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id}, retries=1)
+        cart_payload = await check("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id}, retries=1)
+        if isinstance(cart_payload, dict):
+            cart_obj = cart_payload.get("cart", cart_payload)
+            if isinstance(cart_obj, dict) and "serviceFee" in cart_obj:
+                print(f"  · serviceFee={cart_obj.get('serviceFee')} (release-1.111.1 field present)")
+            else:
+                print("  · note: live silpo_get_shopping_cart_by_id has no serviceFee (pre-1.111.1?)")
 
         if state.get("productId"):
             await check(

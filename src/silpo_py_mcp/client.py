@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
@@ -80,6 +81,18 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=SilpoModel)
 
 _JSONRPC_METHOD_NOT_FOUND = -32601
+
+_MILLIS_RE = re.compile(r"\.\d+(?=(Z|[+-]\d{2}:?\d{2}|$))")
+
+
+def _strip_millis(value: str) -> str:
+    """Strip milliseconds from an ISO timestamp (release-1.111.1).
+
+    The server rejected ``Date#toISOString()``-style stamps (``...:00.123Z``)
+    before 1.111.1; it now strips them upstream, but normalizing client-side
+    keeps the client compatible with older servers and avoids surprises.
+    """
+    return _MILLIS_RE.sub("", value)
 
 
 def _to_plain(value: Any) -> Any:
@@ -280,7 +293,13 @@ class SilpoClient:
         text: str | None = None,
         address: str | None = None,
     ) -> Address:
-        """Find coordinates for an address string (first step when changing address)."""
+        """Find coordinates for an address string (first step when changing address).
+
+        Since server release-1.111.1 an unmatched house number is flagged via
+        ``warning``/``houseNumberMatched`` on the returned address instead of
+        a silent ``success: true`` — check ``address.warning`` (or
+        ``house_number_matched is False``) before relying on the coordinates.
+        """
         value = address if address is not None else text
         if value is None:
             raise ValueError("find_address requires text or address")
@@ -288,7 +307,10 @@ class SilpoClient:
         addresses = payload.get("addresses") if isinstance(payload, dict) else None
         if not addresses:
             raise SilpoValidationError("No addresses found in response")
-        return self._validate(addresses[0], Address)
+        first = dict(addresses[0])
+        if isinstance(payload, dict) and first.get("warning") is None and payload.get("warning"):
+            first["warning"] = payload["warning"]
+        return self._validate(first, Address)
 
     async def get_available_delivery_types(
         self,
@@ -297,7 +319,13 @@ class SilpoClient:
         latitude: float | None = None,
         longitude: float | None = None,
     ) -> list[AvailableDeliveryType]:
-        """Return delivery types available for a coordinate."""
+        """Return delivery types available for a coordinate.
+
+        Since server release-1.111.1 the tool description clarifies that
+        coordinates are only validated for home-delivery types —
+        ``SelfPickup``/``NovaPoshta`` options are returned regardless of the
+        coordinate.
+        """
         lat_val = lat if lat is not None else latitude
         lng_val = lng if lng is not None else longitude
         if lat_val is None or lng_val is None:
@@ -347,17 +375,30 @@ class SilpoClient:
         start: str | None = None,
         end: str | None = None,
     ) -> list[TimeSlot]:
-        """Return delivery time slots for a branch (call after getting the cart)."""
-        dtype = delivery_type or (delivery_types[0] if delivery_types else None)
-        if dtype is None:
+        """Return delivery time slots for a branch (call after getting the cart).
+
+        Since server release-1.111.0 duplicate slots on affected branches are
+        fixed server-side, and the singular ``deliveryType`` argument is
+        accepted as an alias for ``deliveryTypes`` (this method sends the
+        canonical plural form). Since release-1.111.1 timestamps with
+        milliseconds are stripped upstream — this method also strips them
+        client-side — and each slot carries ``serviceFee`` (the SelfPickup
+        "Сервісний збір" fee).
+        """
+        types: list[str] = []
+        if delivery_types:
+            types = list(delivery_types)
+        elif delivery_type:
+            types = [delivery_type]
+        if not types:
             raise ValueError("get_time_slots requires delivery_type or delivery_types")
-        args: dict[str, Any] = {"branchId": branch_id, "deliveryTypes": [dtype]}
+        args: dict[str, Any] = {"branchId": branch_id, "deliveryTypes": types}
         if limit is not None:
             args["limit"] = limit
         if start is not None:
-            args["start"] = start
+            args["start"] = _strip_millis(start)
         if end is not None:
-            args["end"] = end
+            args["end"] = _strip_millis(end)
         payload = await self.call_tool(SilpoTool.GET_TIME_SLOTS, args)
         payload = self._unwrap_payload(payload, "slots")
         return self._validate(payload, TimeSlot, many=True)
@@ -405,8 +446,8 @@ class SilpoClient:
         args: dict[str, Any] = {
             "branchId": branch_id,
             "deliveryType": delivery_type,
-            "timeslotStart": timeslot_start,
-            "timeslotEnd": timeslot_end,
+            "timeslotStart": _strip_millis(timeslot_start),
+            "timeslotEnd": _strip_millis(timeslot_end),
             "products": queries,
         }
         if limit is not None:
@@ -452,8 +493,19 @@ class SilpoClient:
         """Products with filters: category, promotion, stock, price, pagination.
 
         At least one of ``category``/``must_have_promotion``/``promotion_code``/
-        ``product_set`` is required by the server. ``from_price``/``to_price``
-        filter by ``displayPrice``, not ``price`` — they are equal for
+        ``product_set`` is required — since server release-1.111.0 a missing
+        filter returns a clear message listing those accepted filters instead
+        of a raw 400, and this method raises ``ValueError`` with the same
+        message before sending the request. ``in_stock``/``limit``/``offset``/
+        ``sort``/price filters are supplementary and do not satisfy the
+        requirement on their own.
+
+        Timeslot caveat (release-1.111.0): the server does not validate
+        ``timeslot_start``/``timeslot_end`` against real delivery windows — a
+        nonexistent slot silently returns the full catalog. Always pass a real
+        slot from ``get_time_slots``.
+
+        ``from_price``/``to_price`` filter by ``displayPrice``, not ``price`` — they are equal for
         unit-counted products but can differ significantly for weighted ones
         (e.g. ``price=88.11``/``displayPrice=8.81``); to enforce a budget on
         the amount actually paid, filter the returned items by ``price``
@@ -464,11 +516,15 @@ class SilpoClient:
         regardless of ``sort_direction``. Never assume the first/last item on
         a page is the true min/max price.
         """
+        if category is None and must_have_promotion is None and promotion_code is None and product_set is None:
+            raise ValueError(
+                "get_products requires at least one filter: category, mustHavePromotion, promotionCode, set"
+            )
         args: dict[str, Any] = {
             "branchId": branch_id,
             "deliveryType": delivery_type,
-            "timeslotStart": timeslot_start,
-            "timeslotEnd": timeslot_end,
+            "timeslotStart": _strip_millis(timeslot_start),
+            "timeslotEnd": _strip_millis(timeslot_end),
         }
         if category is not None:
             args["category"] = category
@@ -532,8 +588,8 @@ class SilpoClient:
                 "branchId": branch_id,
                 "slug": slug,
                 "deliveryType": delivery_type,
-                "timeslotStart": timeslot_start,
-                "timeslotEnd": timeslot_end,
+                "timeslotStart": _strip_millis(timeslot_start),
+                "timeslotEnd": _strip_millis(timeslot_end),
             },
         )
         payload = self._unwrap_payload(payload, "product")
@@ -561,8 +617,8 @@ class SilpoClient:
             "branchId": branch_id,
             "slug": slug,
             "deliveryType": delivery_type,
-            "timeslotStart": timeslot_start,
-            "timeslotEnd": timeslot_end,
+            "timeslotStart": _strip_millis(timeslot_start),
+            "timeslotEnd": _strip_millis(timeslot_end),
         }
         if limit is not None:
             args["limit"] = limit
@@ -591,7 +647,7 @@ class SilpoClient:
         """List the guest's favorite products."""
         payload = await self.call_tool(
             SilpoTool.GET_MY_FAVORITES,
-            {"branchId": branch_id, "deliveryType": delivery_type, "timeslotStart": timeslot_start},
+            {"branchId": branch_id, "deliveryType": delivery_type, "timeslotStart": _strip_millis(timeslot_start)},
         )
         payload = self._unwrap_payload(payload, "products")
         return self._validate(payload, SilpoProduct, many=True)
@@ -620,8 +676,8 @@ class SilpoClient:
             {
                 "branchId": branch_id,
                 "deliveryType": delivery_type,
-                "timeslotStart": timeslot_start,
-                "timeslotEnd": timeslot_end,
+                "timeslotStart": _strip_millis(timeslot_start),
+                "timeslotEnd": _strip_millis(timeslot_end),
             },
         )
         payload = self._unwrap_payload(payload, "promotions")
@@ -685,8 +741,8 @@ class SilpoClient:
             {
                 "branchId": branch_id,
                 "deliveryType": delivery_type,
-                "timeslotStart": timeslot_start,
-                "timeslotEnd": timeslot_end,
+                "timeslotStart": _strip_millis(timeslot_start),
+                "timeslotEnd": _strip_millis(timeslot_end),
             },
         )
         if isinstance(payload, dict) and isinstance(payload.get("tree"), list):
@@ -742,7 +798,7 @@ class SilpoClient:
             "longitude": longitude,
             "deliveryType": delivery_type,
             "branchId": branch_id,
-            "timeslot": {"start": timeslot_start, "end": timeslot_end},
+            "timeslot": {"start": _strip_millis(timeslot_start), "end": _strip_millis(timeslot_end)},
         }
         if city is not None:
             args["city"] = city
@@ -756,13 +812,21 @@ class SilpoClient:
         return self._validate(payload, CreateShoppingCartResult)
 
     async def get_cart_by_id(self, cart_id: str) -> SilpoCart:
-        """Return the full cart: items, delivery, slot, sums, validations."""
+        """Return the full cart: items, delivery, slot, sums, validations.
+
+        Since server release-1.111.1 the response carries ``serviceFee`` (the
+        SelfPickup "Сервісний збір" fee previously folded into the total) —
+        mapped onto ``SilpoCart.service_fee`` from either the top level or
+        ``calculation``.
+        """
         payload = await self.call_tool(SilpoTool.GET_SHOPPING_CART_BY_ID, {"shoppingCartId": cart_id})
         if isinstance(payload, dict) and isinstance(payload.get("cart"), dict):
             cart = dict(payload["cart"])
             cart.setdefault("loyalty", payload.get("loyalty"))
             cart.setdefault("checkoutWebLink", payload.get("checkoutWebLink"))
             cart.setdefault("checkoutMobileLink", payload.get("checkoutMobileLink"))
+            if cart.get("serviceFee") is None and payload.get("serviceFee") is not None:
+                cart["serviceFee"] = payload["serviceFee"]
             shipments = cart.get("shipments")
             if not cart.get("branchId") and isinstance(shipments, list) and shipments:
                 first = shipments[0]
@@ -772,6 +836,8 @@ class SilpoClient:
             if isinstance(calculation, dict):
                 if isinstance(calculation.get("validations"), list):
                     cart["validations"] = calculation["validations"]
+                if cart.get("serviceFee") is None and calculation.get("serviceFee") is not None:
+                    cart["serviceFee"] = calculation["serviceFee"]
                 totals = cart.get("totals")
                 if not isinstance(totals, dict) or not totals.get("totalPrice"):
                     delivery = calculation.get("delivery") or {}
@@ -780,7 +846,11 @@ class SilpoClient:
                         "itemsPrice": calculation.get("subTotal", 0.0),
                         "deliveryPrice": delivery.get("total", 0.0) if isinstance(delivery, dict) else 0.0,
                         "discount": calculation.get("subDiscount", 0.0),
+                        "serviceFee": calculation.get("serviceFee", 0.0),
                     }
+                elif isinstance(totals, dict) and totals.get("serviceFee") is None:
+                    if calculation.get("serviceFee") is not None:
+                        cart["totals"] = {**totals, "serviceFee": calculation["serviceFee"]}
             payload = cart
         else:
             payload = self._unwrap_payload(payload, "cart")
@@ -840,10 +910,15 @@ class SilpoClient:
         is_adult_confirmed: bool | None = None,
     ) -> CartUpdateResult:
         """Update delivery, slot, address, shipments, or apply bonuses."""
+        normalized_timeslot = dict(timeslot)
+        if isinstance(normalized_timeslot.get("start"), str):
+            normalized_timeslot["start"] = _strip_millis(normalized_timeslot["start"])
+        if isinstance(normalized_timeslot.get("end"), str):
+            normalized_timeslot["end"] = _strip_millis(normalized_timeslot["end"])
         args: dict[str, Any] = {
             "shoppingCartId": cart_id,
             "deliveryType": delivery_type,
-            "timeslot": timeslot,
+            "timeslot": normalized_timeslot,
             "address": address,
             "shipments": shipments,
         }
@@ -907,8 +982,8 @@ class SilpoClient:
         args: dict[str, Any] = {
             "branchId": branch_id,
             "deliveryType": delivery_type,
-            "timeslotStart": timeslot_start,
-            "timeslotEnd": timeslot_end,
+            "timeslotStart": _strip_millis(timeslot_start),
+            "timeslotEnd": _strip_millis(timeslot_end),
         }
         if limit is not None:
             args["limit"] = limit

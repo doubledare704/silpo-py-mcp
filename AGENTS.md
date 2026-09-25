@@ -120,7 +120,8 @@ Key design decisions:
   release-1.110.0 on Sep 10 2026 — no drift in tool names, arg names or
   required sets; reconciled with server release-1.110.1 on Sep 11 2026;
   re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
-  changes; plus the release-1.110.0 `silpo_get_product_details` output fix
+  changes; reconciled with server release-1.111.0/1.111.1 on Sep 25 2026 —
+  still 40 tools, no renames; plus the release-1.110.0 `silpo_get_product_details` output fix
   below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
@@ -157,6 +158,25 @@ Key design decisions:
   `get_product_details` carries `displayPrice`/`image`/`specialPrices`/
   `externalProductId`; batch `meta.droppedCount` surfaces as
   `BatchProductResult.dropped_count`.
+- **Release-1.111.0/1.111.1 fixes (client 0.6.0).** `silpo_get_products`
+  requires one of `category`/`mustHavePromotion`/`promotionCode`/`set`
+  (clear message since 1.111.0, was a raw 400 — `get_products` raises
+  `ValueError` client-side and the mock enforces it; `inStock`/`limit`/sort
+  alone do not satisfy it) and never validates
+  `timeslotStart`/`timeslotEnd` (bogus slot silently returns the full
+  catalog — always pass a real `get_time_slots` slot).
+  `silpo_get_time_slots` accepts singular `deliveryType` as an alias for
+  `deliveryTypes` (mock accepts both; typed method sends the full plural
+  list), strips millisecond timestamps upstream (client strips them too via
+  `_strip_millis`), returns no duplicates, and carries `serviceFee`
+  (`TimeSlot.service_fee`; SelfPickup "Сервісний збір"). `silpo_find_address`
+  flags unmatched house numbers via `warning`/`houseNumberMatched`
+  (`Address.warning`/`house_number_matched`; mock flags queries missing the
+  fixture house number). `silpo_get_available_delivery_types` coordinates are
+  only validated for home-delivery types. `silpo_get_shopping_cart_by_id`
+  carries `serviceFee` (`SilpoCart.service_fee`/`CartTotals.service_fee`,
+  mapped from top level or `calculation`; mock: 15.0 for SelfPickup, else
+  0.0). `examples/real_smoke.py` probes each fix live.
 - **Release-1.110.0 `silpo_get_product_details` fix.** The server no longer
   returns stale catalog-wide `displayPrice`/`price` — pricing and
   availability are the requested branch's real offer, with an explicit

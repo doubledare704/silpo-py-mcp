@@ -93,7 +93,8 @@ asyncio.run(main())
 > re-verified Sep 7 2026; reconciled with server release-1.110.0 on Sep 10
 > 2026; reconciled with server release-1.110.1 on Sep 11 2026;
 > re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
-> changes). Context
+> changes; reconciled with server release-1.111.0/1.111.1 on Sep 25 2026 —
+> still 40 tools, no renames). Context
 > arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them — since 1.110.1 this includes
@@ -105,11 +106,24 @@ asyncio.run(main())
 > `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
 > strings are converted automatically). Product results carry `displayPrice`
 > (`fromPrice`/`toPrice` filter by it, not by `price`);
+> `get_products` requires at least one of `category`/`mustHavePromotion`/
+> `promotionCode`/`set` (release-1.111.0: missing filter raises `ValueError`
+> client-side with the accepted-filter list; `timeslotStart`/`timeslotEnd`
+> are not validated server-side — a bogus slot silently returns the full
+> catalog, so pass a real slot from `get_time_slots`);
+> `get_time_slots` sends `deliveryTypes` (singular `deliveryType` accepted
+> server-side as an alias since 1.111.0; millisecond timestamps stripped
+> since 1.111.1) and each slot carries `serviceFee` (SelfPickup "Сервісний
+> збір"); `find_address` surfaces `warning`/`houseNumberMatched` for
+> unmatched house numbers (release-1.111.1 — check before relying on
+> coordinates); `get_available_delivery_types` coordinates are only validated
+> for home-delivery types (`SelfPickup`/`NovaPoshta` always returned);
 > `get_product_details` carries `displayPrice`/`image`/`specialPrices`/
 > `externalProductId` plus `hasOfferAtBranch` (release-1.110.0: `price`/
 > `displayPrice`/`stock`/`available` are the requested branch's real offer —
 > check `has_offer_at_branch` first, `False` means no real offer at that
-> branch); batch empty entries are skipped
+> branch); `get_cart_by_id` maps `serviceFee` from the top level or
+> `calculation` (release-1.111.1); batch empty entries are skipped
 > (`meta.droppedCount` → `BatchProductResult.dropped_count`). Coupon
 > eligibility comes from
 > `canBeAppliedToOrder` on `silpo_get_coupon_details` — never infer it from
@@ -146,7 +160,8 @@ non-zero if the tool-name contract is violated or a battery call fails.
 
 | Tool | Symptom | Mitigation |
 |---|---|---|
-| `silpo_get_products` | `400 Bad Request` on plain `limit` without filter | smoke uses `category` or `set: klatsniznyzhky` |
+| `silpo_get_products` | `400 Bad Request` on plain `limit` without filter (pre-1.111.0; now a clear message listing `category`/`mustHavePromotion`/`promotionCode`/`set`) | smoke uses `category` or `set: klatsniznyzhky`; typed `get_products` raises `ValueError` before the request |
+| `silpo_get_products` | bogus `timeslotStart`/`timeslotEnd` silently returns the full catalog (documented 1.111.0, not validated) | always pass a real slot from `get_time_slots` |
 | `silpo_get_time_slots` | `-32602` for `deliveryTypes: ["B2B"]` | smoke filters `B2B` from `get_available_delivery_types` |
 | `silpo_get_my_favorites` | `Cannot read properties of null (reading 'id')` — a corrupted favorites entry on the server side. The typed `get_favorites()` raises `SilpoToolExecutionError`; it is **not** a client/model drift. | smoke treats it as skipped; until Silpo fixes it, wrap `get_favorites()` in `try/except SilpoToolExecutionError` or use `call_tool("silpo_get_my_favorites", ...)` and handle the failure |
 | `silpo_get_product_details` | `slug: null` chain failure | resolved once `get_products` returns real slugs |

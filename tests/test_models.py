@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from silpo_py_mcp.models import (
+    Address,
     CouponDetail,
     ProductDetail,
     SilpoCart,
@@ -93,6 +94,66 @@ def test_time_slot_alias_parsing() -> None:
     )
     assert slot.delivery_type == "DeliveryHome"
     assert slot.is_express
+
+
+def test_time_slot_service_fee() -> None:
+    """release-1.111.1: slots carry serviceFee (SelfPickup Сервісний збір)."""
+    slot = TimeSlot.model_validate(
+        {
+            "id": "s1",
+            "deliveryType": "SelfPickup",
+            "branchId": "b1",
+            "start": "2026-09-02T08:00:00Z",
+            "end": "2026-09-02T10:00:00Z",
+            "price": 0.0,
+            "serviceFee": 15.0,
+        }
+    )
+    assert slot.service_fee == 15.0
+
+
+def test_address_house_number_flag() -> None:
+    """release-1.111.1: unmatched house numbers are flagged."""
+    matched = Address.model_validate(
+        {
+            "address": "Київ, вул. Анни Ахматової, 9",
+            "houseNumber": "9",
+            "latitude": 50.3957,
+            "longitude": 30.6217,
+            "houseNumberMatched": True,
+            "warning": None,
+        }
+    )
+    assert matched.house_number_matched is True
+    assert matched.warning is None
+
+    flagged = Address.model_validate(
+        {
+            "address": "Київ, вул. Хрещатик, 999999",
+            "houseNumber": "9",
+            "latitude": 50.3957,
+            "longitude": 30.6217,
+            "houseNumberMatched": False,
+            "warning": "House number could not be matched.",
+        }
+    )
+    assert flagged.house_number_matched is False
+    assert flagged.warning
+
+
+def test_cart_service_fee() -> None:
+    """release-1.111.1: cart carries serviceFee."""
+    cart = SilpoCart.model_validate(
+        {
+            "cartId": "cart-1",
+            "branchId": "bran-1",
+            "deliveryType": "SelfPickup",
+            "serviceFee": 15.0,
+            "totals": {"totalPrice": 100.0, "itemsPrice": 100.0, "serviceFee": 15.0},
+        }
+    )
+    assert cart.service_fee == 15.0
+    assert cart.totals.service_fee == 15.0
 
 
 def test_product_accepts_live_shape_with_null_company() -> None:
