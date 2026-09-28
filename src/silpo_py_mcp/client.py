@@ -44,6 +44,7 @@ from silpo_py_mcp.models import (
     AvailableDeliveryType,
     BatchProductResult,
     Branch,
+    CartAddressType,
     CartLineInput,
     CartSummary,
     CartUpdateResult,
@@ -75,6 +76,7 @@ from silpo_py_mcp.models import (
     SilpoProduct,
     TimeSlot,
     TimeSlotDeliveryType,
+    UpdateCartDeliveryType,
 )
 from silpo_py_mcp.tools import SilpoTool
 
@@ -119,6 +121,25 @@ def _normalize_slot_bound(value: str, *, field: str) -> str:
             "'2026-09-28T10:00:00Z'); date-only values are rejected by the server."
         ) from None
     return normalized
+
+
+def _check_update_delivery_type(value: Any) -> str | None:
+    """Return the offending value when ``deliveryType`` is outside the enum.
+
+    Since release-1.111.3 ``silpo_update_shopping_cart`` accepts only the eight
+    schedulable delivery types; the historical/express variants the other tools
+    still advertise are rejected. Validating here turns that into an actionable
+    error.
+    """
+    if isinstance(value, UpdateCartDeliveryType):
+        return None
+    if not isinstance(value, str):
+        return str(value)
+    lowered = value.lower()
+    for member in UpdateCartDeliveryType:
+        if member.value.lower() == lowered:
+            return None
+    return value
 
 
 def _to_plain(value: Any) -> Any:
@@ -415,6 +436,19 @@ class SilpoClient:
         :class:`~silpo_py_mcp.models.TimeSlotDeliveryType`; this method
         validates the types, the ``limit`` bounds (1..100) and the timestamp
         format up front instead of letting the server return ``-32602``/``400``.
+
+        Release-1.111.3 clarified the semantics, so when reading the result:
+
+        * Filter on ``slot.is_bookable`` — a delivery type can report real
+          delivery cost and ``min_order_cost`` while every slot is
+          ``available=False``, so pricing presence does not mean bookable.
+        * ``slot.min_order_cost`` is the minimum order amount for the slot and
+          is only reported here.
+        * ``slot.service_fee`` previews the SelfPickup fee for comparing
+          options; once a cart exists prefer
+          ``cart.calculation.service_fee.total``, which is what is charged.
+        * ``slot.starts_at``/``ends_at`` are **UTC** — convert before showing
+          them to the guest.
         """
         types: list[str] = []
         if delivery_types:
@@ -478,10 +512,12 @@ class SilpoClient:
         Empty strings and whitespace-only entries are silently skipped by the
         server (see ``dropped_count``) — all-empty input still returns
         ``success:true`` with empty results, never an error. Terms also accept
-        exact numeric article codes (``externalProductId``); prefer those over
-        fuzzy names when known. Each ``queries[]`` entry reports ``totalFound``
-        (real match count, which can exceed the returned ``products`` when
-        ``limit`` is smaller).
+        exact numeric article codes (``externalProductId``) and 6+ digit
+        barcodes; prefer those over fuzzy names when known, and remember that a
+        product absent from the results may simply be out of stock here.
+        ``total_found`` carries the live ``queries[].totalFound`` — the real
+        match count, which exceeds ``results`` whenever ``limit`` cut the list
+        short.
         """
         args: dict[str, Any] = {
             "branchId": branch_id,
@@ -501,14 +537,23 @@ class SilpoClient:
         if isinstance(payload, dict) and isinstance(payload.get("queries"), list):
             results: dict[str, Any] = {}
             unmatched: list[str] = []
+            total_found: dict[str, int] = {}
             for entry in payload["queries"]:
                 query = entry.get("query")
                 matches = entry.get("products") or []
+                if query:
+                    found = entry.get("totalFound")
+                    total_found[query] = int(found) if isinstance(found, (int, float)) else len(matches)
                 if query and matches:
                     results[query] = matches
                 elif query:
                     unmatched.append(query)
-            payload = {"results": results, "unmatched": unmatched, "droppedCount": dropped_count}
+            payload = {
+                "results": results,
+                "unmatched": unmatched,
+                "droppedCount": dropped_count,
+                "totalFound": total_found,
+            }
         return self._validate(payload, BatchProductResult)
 
     async def get_products(
@@ -737,15 +782,20 @@ class SilpoClient:
         delivery_type: str,
         category_slug: str,
     ) -> CategoryDetail:
-        """Details of a category: subcategories, product count."""
+        """Details of a category: title, breadcrumb path and price range.
+
+        **Breaking in release-1.111.3:** the tool no longer returns child
+        categories — the upstream API never includes them for this endpoint —
+        so ``CategoryDetail.subcategories`` is gone. Use ``get_categories_tree``
+        to discover child categories. ``CategoryDetail.path``,
+        ``price_range`` and ``is_visible`` come from the response; a
+        ``is_visible is False`` category has no products at this branch, so
+        do not browse it via ``get_products``.
+        """
         payload = await self.call_tool(
             SilpoTool.GET_CATEGORY,
             {"branchId": branch_id, "deliveryType": delivery_type, "categorySlug": category_slug},
         )
-        if isinstance(payload, dict):
-            category = payload.get("category")
-            if isinstance(category, dict) and isinstance(category.get("children"), list):
-                payload = {**payload, "subcategories": category["children"]}
         return self._validate(payload, CategoryDetail)
 
     async def get_categories(
@@ -858,6 +908,18 @@ class SilpoClient:
         SelfPickup "Сервісний збір" fee previously folded into the total) —
         mapped onto ``SilpoCart.service_fee`` from either the top level or
         ``calculation``.
+
+        Release-1.111.3 added the payment and delivery-discount surface: the
+        live ``calculation`` is parsed into :class:`CartCalculation`, so
+        ``cart.payment.available_types`` lists every usable payment method
+        (with BNPL terms in ``cart.payment.loan``) and
+        ``cart.delivery.sub_total``/``sub_discount`` expose the delivery
+        discount — ``cart.payment_type`` alone only reflects the *selected*
+        method and stays ``"Unknown"`` until the guest picks one.
+
+        Timeslot values are UTC; convert before showing them to the guest. If
+        ``cart.calculation.total_after_discounts`` exceeds a budget the guest
+        stated, trim the cart and re-read it before reporting success.
         """
         payload = await self.call_tool(SilpoTool.GET_SHOPPING_CART_BY_ID, {"shoppingCartId": cart_id})
         if isinstance(payload, dict) and isinstance(payload.get("cart"), dict):
@@ -872,25 +934,6 @@ class SilpoClient:
                 first = shipments[0]
                 if isinstance(first, dict) and first.get("branchId"):
                     cart["branchId"] = first["branchId"]
-            calculation = cart.get("calculation")
-            if isinstance(calculation, dict):
-                if isinstance(calculation.get("validations"), list):
-                    cart["validations"] = calculation["validations"]
-                if cart.get("serviceFee") is None and calculation.get("serviceFee") is not None:
-                    cart["serviceFee"] = calculation["serviceFee"]
-                totals = cart.get("totals")
-                if not isinstance(totals, dict) or not totals.get("totalPrice"):
-                    delivery = calculation.get("delivery") or {}
-                    cart["totals"] = {
-                        "totalPrice": calculation.get("total", 0.0),
-                        "itemsPrice": calculation.get("subTotal", 0.0),
-                        "deliveryPrice": delivery.get("total", 0.0) if isinstance(delivery, dict) else 0.0,
-                        "discount": calculation.get("subDiscount", 0.0),
-                        "serviceFee": calculation.get("serviceFee", 0.0),
-                    }
-                elif isinstance(totals, dict) and totals.get("serviceFee") is None:
-                    if calculation.get("serviceFee") is not None:
-                        cart["totals"] = {**totals, "serviceFee": calculation["serviceFee"]}
             payload = cart
         else:
             payload = self._unwrap_payload(payload, "cart")
@@ -945,16 +988,57 @@ class SilpoClient:
         branch_id: str | None = None,
         promo_code: str | None = None,
         bonus_requested: float | None = None,
+        clear_bonus: bool = False,
         feedback_changes: str | None = None,
         feedback_contacts: str | None = None,
         is_adult_confirmed: bool | None = None,
     ) -> CartUpdateResult:
-        """Update delivery, slot, address, shipments, or apply bonuses."""
+        """Update delivery, slot, address, shipments, or apply bonuses.
+
+        Release-1.111.3 tightened the schema: ``address`` must carry an
+        ``addressType`` (``house``/``flat``/``office``/``point``/``self-pickup``/
+        ``nova-poshta``) and every ``shipments`` entry a ``companyId`` +
+        ``branchId`` pair; ``deliveryType`` is restricted to the eight values
+        in :class:`UpdateCartDeliveryType`. The server wants both objects copied
+        verbatim from ``get_cart_by_id`` — read them off
+        ``cart.update_payloads`` rather than rebuilding them, then pass the
+        result here.
+
+        Raises ``ValueError`` before the request when a required field is
+        missing, so the failure names the offending argument instead of coming
+        back as an opaque schema rejection. ``bonus_requested`` applies bonuses
+        (set it to ``loyalty.bonus_available`` or less); pass ``clear_bonus``
+        to send an explicit ``null`` and remove bonus payment.
+        """
+        invalid_type = _check_update_delivery_type(delivery_type)
+        if invalid_type is not None:
+            accepted = "|".join(member.value for member in UpdateCartDeliveryType)
+            raise ValueError(
+                f"update_shopping_cart deliveryType={invalid_type!r} is not accepted; expected one of {accepted}"
+            )
+        if not isinstance(address, dict) or not address.get("addressType"):
+            raise ValueError(
+                "update_shopping_cart requires address.addressType (release-1.111.3). "
+                "Copy the address object from the cart response (cart.address) instead of "
+                "constructing it; its keys are: " + "|".join(member.value for member in CartAddressType)
+            )
+        if not shipments:
+            raise ValueError("update_shopping_cart requires at least one shipments entry (release-1.111.3)")
+        for index, shipment in enumerate(shipments):
+            missing = [
+                key for key in ("companyId", "branchId") if not isinstance(shipment, dict) or not shipment.get(key)
+            ]
+            if missing:
+                raise ValueError(
+                    f"update_shopping_cart shipments[{index}] is missing {', '.join(missing)} (release-1.111.3). "
+                    "Copy the shipments array from the cart response (cart.shipments) instead of constructing it."
+                )
         normalized_timeslot = dict(timeslot)
-        if isinstance(normalized_timeslot.get("start"), str):
-            normalized_timeslot["start"] = _strip_millis(normalized_timeslot["start"])
-        if isinstance(normalized_timeslot.get("end"), str):
-            normalized_timeslot["end"] = _strip_millis(normalized_timeslot["end"])
+        for key in ("start", "end"):
+            if isinstance(normalized_timeslot.get(key), str):
+                normalized_timeslot[key] = _strip_millis(normalized_timeslot[key])
+        if not normalized_timeslot.get("start") or not normalized_timeslot.get("end"):
+            raise ValueError("update_shopping_cart requires timeslot.start and timeslot.end (release-1.111.3)")
         args: dict[str, Any] = {
             "shoppingCartId": cart_id,
             "deliveryType": delivery_type,
@@ -966,7 +1050,9 @@ class SilpoClient:
             args["branchId"] = branch_id
         if promo_code is not None:
             args["promoCode"] = promo_code
-        if bonus_requested is not None:
+        if clear_bonus:
+            args["bonusRequested"] = None
+        elif bonus_requested is not None:
             args["bonusRequested"] = bonus_requested
         if feedback_changes is not None:
             args["feedbackChanges"] = feedback_changes

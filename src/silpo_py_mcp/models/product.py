@@ -20,7 +20,17 @@ class SilpoProduct(SilpoModel):
     ``display_price`` (release-1.110.1) is the per-display-unit price the
     server filters ``fromPrice``/``toPrice`` by — it equals ``price`` for
     unit-counted products but can differ significantly for weighted ones
-    (e.g. ``price=88.11``/``displayPrice=8.81``).
+    (e.g. ``price=88.11``/``displayPrice=8.81``). When a guest states a
+    budget in real money, filter the returned products by ``price``
+    yourself rather than relying on ``fromPrice``/``toPrice``, which are
+    applied to ``display_price`` and so misjudge weighted items.
+
+    ``weighted``/``step``/``display_ratio`` (release-1.111.3): for
+    ``weighted=True`` products ``step`` and the ``quantity`` sent to
+    ``add_or_update_cart_products`` are **always kilograms**, whatever unit
+    ``display_ratio`` shows (``display_ratio="100г"`` with ``step=0.35``
+    still means 350 g). ``display_ratio`` only describes one unit for
+    display/pricing; it is never a conversion factor for ``step``.
     """
 
     product_id: str = Field(validation_alias=AliasChoices("productId", "id"), description="Silpo product identifier.")
@@ -68,6 +78,13 @@ class ProductDetail(SilpoModel):
     offer exists. Always check it first: when ``False`` the product has no
     real offer at that branch (mock returns ``stock=0``/``available=False``
     with the catalog price for reference).
+
+    This card is for product information, not for final ordering decisions —
+    confirm price and availability through ``find_products_batch`` or the
+    cart before telling the guest what they will pay (release-1.111.3).
+    ``image`` is a single thumbnail while ``images`` is the full gallery
+    (it may repeat ``image`` plus extras); prefer ``images`` for a detail
+    view. For ``weighted`` products ``step`` is always in kilograms.
     """
 
     product_id: str | None = Field(default=None, validation_alias=AliasChoices("productId", "id"))
@@ -126,11 +143,28 @@ class BatchProductResult(SilpoModel):
     empty/whitespace-only entries the server skipped rather than searched
     (release-1.110.1 never errors on those; all-empty input returns
     ``success:true`` with an empty ``queries`` array).
+
+    ``total_found`` maps each query to the live ``queries[].totalFound`` — the
+    real number of matches, which exceeds ``results[query]`` whenever
+    ``limit`` cut the list short (release-1.111.3). Re-query with a higher
+    ``limit`` instead of concluding a product does not exist when it is
+    missing from ``results``: a zero-stock product can be absent even when
+    searched by its exact article code.
     """
 
     results: dict[str, list[SilpoProduct]]
     unmatched: list[str] = Field(default_factory=list)
     dropped_count: int = Field(default=0, alias="droppedCount")
+    total_found: dict[str, int] = Field(default_factory=dict, alias="totalFound")
+
+    @property
+    def truncated_queries(self) -> list[str]:
+        """Queries whose real match count exceeded the returned products."""
+        return [query for query, count in self.total_found.items() if count > len(self.results.get(query, []))]
+
+    def is_truncated(self, query: str) -> bool:
+        """Whether ``query`` had more matches than were returned."""
+        return self.total_found.get(query, 0) > len(self.results.get(query, []))
 
 
 class ProductSet(SilpoModel):

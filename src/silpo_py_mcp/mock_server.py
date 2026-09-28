@@ -25,7 +25,10 @@ from typing import Any, ClassVar
 from fastmcp import FastMCP
 from fastmcp.server.context import Context
 
-from silpo_py_mcp.models import TimeSlotDeliveryType
+from silpo_py_mcp.models import TimeSlotDeliveryType, UpdateCartDeliveryType
+
+#: ``deliveryType`` values accepted by ``silpo_update_shopping_cart`` (release-1.111.3).
+_UPDATE_CART_DELIVERY_TYPES: tuple[str, ...] = tuple(member.value for member in UpdateCartDeliveryType)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -353,38 +356,108 @@ class SilpoMockServer:
         cartId = carts.get(session_key)
         if cartId is None or cartId not in self._carts:
             cartId = f"cart-{uuid.uuid4().hex[:8]}"
-            self._carts[cartId] = {
-                "cartId": cartId,
-                "branchId": "bran-1",
-                "deliveryType": "DeliveryHome",
-                "timeslot": None,
-                "address": None,
-                "items": [],
-                "totals": {
-                    "totalPrice": 0.0,
-                    "itemsPrice": 0.0,
-                    "deliveryPrice": 0.0,
-                    "discount": 0.0,
-                    "serviceFee": 0.0,
+            self._carts[cartId] = self._new_cart(
+                cartId,
+                "DeliveryHome",
+                {
+                    "addressType": "house",
+                    "address": "проспект Петра Григоренка, 22/20",
+                    "city": "Київ",
+                    "latitude": str(FIXTURE_ADDRESSES[0].get("latitude", "")),
+                    "longitude": str(FIXTURE_ADDRESSES[0].get("longitude", "")),
                 },
-                "serviceFee": 0.0,
-                "loyalty": {
-                    "isEnabled": True,
-                    "bonusAvailable": 125.5,
-                    "bonusRequested": None,
-                    "bonusApplied": 0.0,
-                },
-                "validations": [],
-                "checkoutWebLink": f"https://silpo.ua/cart/{cartId}",
-                "checkoutMobileLink": f"silpo://cart/{cartId}",
-            }
+                [{"companyId": "co-1", "branchId": "bran-1"}],
+            )
             carts[session_key] = cartId
         return cartId
+
+    def _new_cart(
+        self,
+        cart_id: str,
+        delivery_type: str,
+        address: dict[str, Any],
+        shipments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build an empty cart that is already valid input for a cart update.
+
+        Since release-1.111.3 ``silpo_update_shopping_cart`` requires an
+        ``address.addressType`` and a ``companyId``/``branchId`` pair per
+        shipment, and the server wants both copied verbatim from the cart — so
+        a fresh mock cart carries them from the start and
+        ``cart.update_payloads`` round-trips.
+        """
+        fee = self._service_fee_for(delivery_type)
+        cart: dict[str, Any] = {
+            "cartId": cart_id,
+            "branchId": shipments[0]["branchId"] if shipments else "bran-1",
+            "deliveryType": delivery_type,
+            "timeslot": {"start": "2026-09-02T08:00:00+00:00", "end": "2026-09-02T10:00:00+00:00"},
+            "address": address,
+            "shipments": shipments,
+            "items": [],
+            "totals": {
+                "totalPrice": 0.0,
+                "itemsPrice": 0.0,
+                "deliveryPrice": 0.0,
+                "discount": 0.0,
+                "serviceFee": fee,
+            },
+            "serviceFee": fee,
+            "paymentType": "Unknown",
+            "loyalty": {
+                "isEnabled": True,
+                "bonusTotal": 125.5,
+                "bonusAvailable": 125.5,
+                "bonusRequested": None,
+                "bonusApplied": 0.0,
+            },
+            "validations": [],
+            "checkoutWebLink": f"https://silpo.ua/cart/{cart_id}",
+            "checkoutMobileLink": f"silpo://cart/{cart_id}",
+        }
+        self._build_calculation(cart)
+        return cart
 
     @staticmethod
     def _service_fee_for(delivery_type: str) -> float:
         """SelfPickup "Сервісний збір" fee (release-1.111.1); 0 otherwise."""
         return 15.0 if delivery_type == "SelfPickup" else 0.0
+
+    #: Payment methods the mock offers, in the live order (release-1.111.3).
+    PAYMENT_TYPES: tuple[str, ...] = (
+        "Cashdesk",
+        "Card",
+        "Masterpass",
+        "ApplePay",
+        "GooglePay",
+        "BVR",
+        "B2B",
+        "BNPL",
+    )
+    #: BNPL minimum order total, as in the live ``loanConfig``.
+    BNPL_MIN_TOTAL = 1000.0
+
+    @staticmethod
+    def _payment_block(total: float) -> dict[str, Any]:
+        """Build ``calculation.payment`` (release-1.111.3).
+
+        Every method is listed with its availability; BNPL is blocked below
+        :attr:`BNPL_MIN_TOTAL`, mirroring the live ``order.payment_types.disabled``
+        validation. ``type`` stays ``"Unknown"`` until a method is selected at
+        checkout — it reflects the selection, not what is on offer.
+        """
+        bnpl_available = total >= SilpoMockServer.BNPL_MIN_TOTAL
+        loan_config = {"bufferPercent": 10, "minTotal": SilpoMockServer.BNPL_MIN_TOTAL, "paymentCount": 3}
+        loan = {"loanAvailable": bnpl_available, "loanCalculation": None, "loanConfig": loan_config}
+        types = [
+            {
+                "type": name,
+                "available": True if name != "BNPL" else bnpl_available,
+                "loan": dict(loan) if name == "BNPL" else None,
+            }
+            for name in SilpoMockServer.PAYMENT_TYPES
+        ]
+        return {"type": "Unknown", "types": types, "loan": loan}
 
     def _recompute_totals(self, cart: dict[str, Any]) -> None:
         items_price = sum(item["totalPrice"] for item in cart["items"])
@@ -394,6 +467,64 @@ class SilpoMockServer:
         cart["totals"]["deliveryPrice"] = 0.0
         cart["totals"]["totalPrice"] = round(items_price - bonus_applied, 2)
         cart["totals"]["discount"] = round(sum(item.get("discount", 0.0) for item in cart["items"]), 2)
+        self._build_calculation(cart)
+
+    def _build_calculation(self, cart: dict[str, Any]) -> None:
+        """Mirror the live ``calculation`` block (release-1.111.3).
+
+        Carries the payment method list with availability, the delivery cost
+        split (``subTotal`` flat cost, ``subDiscount`` how much was waived) and
+        ``totalAfterDiscounts`` — the amount the guest actually pays.
+        """
+        totals = cart.get("totals") or {}
+        products_total = float(totals.get("itemsPrice") or 0.0)
+        bonus_applied = float((cart.get("loyalty") or {}).get("bonusApplied") or 0.0)
+        total = round(products_total + float(totals.get("deliveryPrice") or 0.0) - bonus_applied, 2)
+        delivery_sub_total = 0.0
+        delivery_discount = 0.0
+        service_fee = float(cart.get("serviceFee") or 0.0)
+        total_after = round(total, 2)
+        cart["calculation"] = {
+            "total": total,
+            "totalAfterDiscounts": total_after,
+            "certificatesTotal": 0.0,
+            "productsTotal": products_total,
+            "subTotal": products_total,
+            "subDiscount": bonus_applied,
+            "serviceFee": {"total": service_fee, "subTotal": service_fee, "subDiscount": 0.0},
+            "delivery": {
+                "total": round(delivery_sub_total - delivery_discount, 2),
+                "subTotal": delivery_sub_total,
+                "subDiscount": delivery_discount,
+                "totalWeight": round(sum(item.get("quantity", 0.0) for item in cart["items"]), 3),
+                "deliveryExpressByPromise": None,
+            },
+            "promoCode": cart.get("promoCode"),
+            "payment": self._payment_block(total),
+            "loyalty": cart.get("loyalty"),
+            "validations": self._cart_validations(total),
+        }
+        cart.setdefault("paymentType", "Unknown")
+
+    @staticmethod
+    def _cart_validations(total: float) -> list[dict[str, Any]]:
+        """Checkout validations, including the release-1.111.3 payment notice."""
+        validations: list[dict[str, Any]] = []
+        if total < SilpoMockServer.BNPL_MIN_TOTAL:
+            validations.append(
+                {
+                    "level": "info",
+                    "type": "order",
+                    "message": "order.payment_types.disabled",
+                    "context": {
+                        "reason": "not_available_for_total",
+                        "paymentTypes": ["BNPL"],
+                        "total": total,
+                        "minTotal": SilpoMockServer.BNPL_MIN_TOTAL,
+                    },
+                }
+            )
+        return validations
 
     @staticmethod
     def _find_product(productId: str) -> dict[str, Any] | None:
@@ -512,6 +643,12 @@ class SilpoMockServer:
             ``+00:00`` and naive stamps are read as UTC, date-only values are
             rejected; ``deliveryTypes`` is restricted to the 9-value enum and
             ``limit`` must be between 1 and 100).
+
+            Release-1.111.3 clarified the semantics: ``available`` is
+            authoritative (a type can show pricing while every slot is
+            unavailable), ``minOrderCost`` is reported only here, ``serviceFee``
+            is a preview that ``cart.calculation.serviceFee.total`` supersedes,
+            and all slot times are UTC.
             """
             if limit is not None and not 1 <= limit <= 100:
                 raise ValueError(f"limit must be between 1 and 100, got {limit}")
@@ -835,23 +972,29 @@ class SilpoMockServer:
             deliveryType: str,
             categorySlug: str,
         ) -> dict[str, Any]:
-            """Details of a category: subcategories, product count."""
+            """Details of a category: breadcrumb path and price range.
+
+            Mirrors server release-1.111.3: the tool no longer returns child
+            categories — the upstream API never includes them for this
+            endpoint. Use silpo_get_categories_tree to discover children.
+            """
             _ = (branchId, deliveryType)
-            cat_by_slug = next((c for c in CATEGORIES if c["slug"] == categorySlug), None)
-            cid = cat_by_slug["id"] if cat_by_slug else None
-            if cid is None:
-                raise ValueError(f"Category not found: {categorySlug}")
-            category = next((c for c in CATEGORIES if c["id"] == cid), None)
+            category = next((c for c in CATEGORIES if c["slug"] == categorySlug), None)
             if category is None:
-                raise ValueError(f"Category not found: {cid}")
-            subcats = [c for c in CATEGORIES if c["parentId"] == cid]
+                raise ValueError(f"Category not found: {categorySlug}")
+            path: list[dict[str, Any]] = []
+            cursor: dict[str, Any] | None = category
+            while cursor is not None:
+                path.append({"id": cursor["id"], "slug": cursor["slug"], "title": cursor["title"]})
+                parent_id = cursor.get("parentId")
+                cursor = next((c for c in CATEGORIES if c["id"] == parent_id), None) if parent_id else None
+            path.reverse()
             return {
                 "success": True,
                 "category": {
                     **category,
-                    "path": None,
-                    "priceRange": None,
-                    "children": [{"id": c["id"], "slug": c["slug"], "title": c["title"]} for c in subcats],
+                    "path": path,
+                    "priceRange": {"min": 12.5, "max": 249.9},
                     "visible": True,
                 },
             }
@@ -925,40 +1068,21 @@ class SilpoMockServer:
                     }
             slot = timeslot
             cart_id = f"cart-{uuid.uuid4().hex[:8]}"
-            fee = self._service_fee_for(deliveryType)
-            self._carts[cart_id] = {
-                "cartId": cart_id,
-                "branchId": branchId,
-                "deliveryType": deliveryType,
-                "timeslot": slot,
-                "address": {
+            self._carts[cart_id] = self._new_cart(
+                cart_id,
+                deliveryType,
+                {
                     "addressType": addressType,
-                    "latitude": latitude,
-                    "longitude": longitude,
+                    "latitude": str(latitude),
+                    "longitude": str(longitude),
                     "city": city,
                     "street": street,
                     "house": house,
                     "district": district,
                 },
-                "items": [],
-                "totals": {
-                    "totalPrice": 0.0,
-                    "itemsPrice": 0.0,
-                    "deliveryPrice": 0.0,
-                    "discount": 0.0,
-                    "serviceFee": fee,
-                },
-                "serviceFee": fee,
-                "loyalty": {
-                    "isEnabled": True,
-                    "bonusAvailable": 125.5,
-                    "bonusRequested": None,
-                    "bonusApplied": 0.0,
-                },
-                "validations": [],
-                "checkoutWebLink": f"https://silpo.ua/cart/{cart_id}",
-                "checkoutMobileLink": f"silpo://cart/{cart_id}",
-            }
+                [{"companyId": "co-1", "branchId": branchId}],
+            )
+            self._carts[cart_id]["timeslot"] = slot
             if session_key is not None:
                 SilpoMockServer._mock_carts[session_key] = cart_id
             return {
@@ -971,8 +1095,10 @@ class SilpoMockServer:
         def silpo_get_shopping_cart_by_id(shoppingCartId: str) -> dict[str, Any]:
             """Return the full cart: items, delivery, slot, sums, validations.
 
-            Mirrors server release-1.111.1: carries ``serviceFee`` (SelfPickup
-            "Сервісний збір" fee).
+            Mirrors server release-1.111.1 (``serviceFee`` — the SelfPickup
+            "Сервісний збір" fee) and release-1.111.3 (``calculation.payment``
+            lists every payment method with its availability, plus the delivery
+            discount split and ``totalAfterDiscounts``).
             """
             if shoppingCartId not in self._carts:
                 raise ValueError(f"Cart not found: {shoppingCartId}")
@@ -981,6 +1107,7 @@ class SilpoMockServer:
             totals = cart.get("totals")
             if isinstance(totals, dict):
                 totals.setdefault("serviceFee", cart["serviceFee"])
+            self._build_calculation(cart)
             return cart
 
         @self._fastmcp.tool
@@ -1060,15 +1187,49 @@ class SilpoMockServer:
             promoCode: str | None = None,
             bonusRequested: float | None = None,
         ) -> dict[str, Any]:
-            """Update delivery, slot, address, shipments, or apply bonuses."""
+            """Update delivery, slot, address, shipments, or apply bonuses.
+
+            Mirrors the release-1.111.3 schema: ``address`` must carry an
+            ``addressType``, every shipment a ``companyId``/``branchId`` pair
+            (both are copied verbatim from the cart, not constructed), and
+            ``deliveryType`` is limited to the eight schedulable types.
+
+            ``bonusRequested`` is nullable as in the live schema, but a mock
+            tool function cannot distinguish an explicit ``null`` from an
+            omitted argument — so ``null`` leaves the request untouched here.
+            """
             cid = shoppingCartId
             if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
+            invalid_type = next((t for t in _UPDATE_CART_DELIVERY_TYPES if t == deliveryType), None)
+            if invalid_type is None:
+                raise ValueError(
+                    f"Invalid option for deliveryType: expected one of "
+                    f"{'|'.join(_UPDATE_CART_DELIVERY_TYPES)}; got {deliveryType!r}"
+                )
+            if not isinstance(address, dict) or not address.get("addressType"):
+                raise ValueError(
+                    "address.addressType is required (release-1.111.3); copy the address "
+                    "object from silpo_get_shopping_cart_by_id"
+                )
+            if not shipments:
+                raise ValueError("shipments must contain at least one entry (release-1.111.3)")
+            for index, shipment in enumerate(shipments):
+                missing = [
+                    k for k in ("companyId", "branchId") if not isinstance(shipment, dict) or not shipment.get(k)
+                ]
+                if missing:
+                    raise ValueError(
+                        f"shipments[{index}] is missing {' and '.join(missing)} (release-1.111.3); "
+                        "copy the shipments array from silpo_get_shopping_cart_by_id"
+                    )
             cart = self._carts[cid]
             cart["deliveryType"] = deliveryType
             cart["timeslot"] = timeslot
             cart["address"] = address
             cart["shipments"] = shipments
+            if not branchId and shipments and isinstance(shipments[0], dict):
+                branchId = shipments[0].get("branchId")
             fee = self._service_fee_for(deliveryType)
             cart["serviceFee"] = fee
             if isinstance(cart.get("totals"), dict):
@@ -1082,7 +1243,7 @@ class SilpoMockServer:
                 available = cart["loyalty"].get("bonusAvailable", 0.0)
                 cart["loyalty"]["bonusRequested"] = min(bonusRequested, available)
                 cart["loyalty"]["bonusApplied"] = cart["loyalty"]["bonusRequested"]
-                self._recompute_totals(cart)
+            self._recompute_totals(cart)
             return {"cart": cart, "changed": True}
 
         @self._fastmcp.tool

@@ -98,6 +98,26 @@ class TimeSlotDeliveryType(StrEnum):
     PRE_ORDER = "PreOrder"
 
 
+class UpdateCartDeliveryType(StrEnum):
+    """Delivery types accepted by ``silpo_update_shopping_cart`` (release-1.111.3).
+
+    A third, narrower enum: the update tool refuses the historical/express
+    variants (``Unknown``/``JustIn``/``JustInPost``/``DeliveryFlat``/…) and
+    takes only the eight types a cart can actually be scheduled with. It is a
+    subset of :class:`DeliveryType` and of :class:`TimeSlotDeliveryType` minus
+    ``DeliveryExpress``.
+    """
+
+    SELF_PICKUP = "SelfPickup"
+    DELIVERY_HOME = "DeliveryHome"
+    LONG_DELIVERY = "LongDelivery"
+    DELIVERY_EXPRESS_BY_PROMISE = "DeliveryExpressByPromise"
+    WIDE_ASSORT = "WideAssortDelivery"
+    B2B = "B2B"
+    PRE_ORDER = "PreOrder"
+    NOVA_POSHTA = "NovaPoshta"
+
+
 class AvailableDeliveryType(SilpoModel):
     """A delivery option for a given coordinate."""
 
@@ -169,6 +189,21 @@ class TimeSlot(SilpoModel):
     Since server release-1.111.1 slots carry ``serviceFee`` — the SelfPickup
     "Сервісний збір" fee previously folded into the cart total with no line
     item (0 for home-delivery slots).
+
+    Release-1.111.3 clarified the field semantics:
+
+    * ``is_available`` is authoritative. A delivery type can report real
+      ``delivery_cost``/``min_order_cost`` data while *every* slot has
+      ``available=False`` — pricing presence does not mean the type is
+      bookable right now, so always filter on ``is_available``.
+    * ``min_order_cost`` is the minimum order amount for this slot and is
+      only ever reported here — the cart does not repeat it.
+    * ``service_fee`` is a *preview* of the SelfPickup fee for comparing
+      delivery options. The amount actually charged to a cart is
+      ``calculation.service_fee.total`` on ``silpo_get_shopping_cart_by_id``,
+      which takes precedence once a cart exists.
+    * ``starts_at``/``ends_at`` are **UTC** — convert to the guest's timezone
+      before presenting them.
     """
 
     id: str = ""
@@ -186,6 +221,11 @@ class TimeSlot(SilpoModel):
     max_weight: float | None = Field(default=None, alias="maxWeight")
     constraints: dict[str, Any] | None = None
     fast: dict[str, Any] | None = None
+
+    @property
+    def is_bookable(self) -> bool:
+        """Whether this slot can be picked right now (release-1.111.3)."""
+        return self.is_available
 
 
 class NovaPoshtaSettlement(SilpoModel):

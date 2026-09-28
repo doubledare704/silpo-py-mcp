@@ -296,8 +296,8 @@ async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:
                 "shoppingCartId": cart_id,
                 "deliveryType": "DeliveryHome",
                 "timeslot": {"start": "2026-09-06T10:00:00+03:00", "end": "2026-09-06T11:00:00+03:00"},
-                "address": {"address": "Київ, вул. Анни Ахматової, 9"},
-                "shipments": [],
+                "address": {"addressType": "house", "address": "Київ, вул. Анни Ахматової, 9"},
+                "shipments": [{"companyId": "co-1", "branchId": "bran-1"}],
                 "bonusRequested": 50.0,
             },
         )

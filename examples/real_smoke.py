@@ -515,7 +515,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         state["categoryId"] = first.get("id") or first.get("categoryId")
         state["category"] = state["categorySlug"] or first.get("slug")
         if state.get("categorySlug"):
-            await check(
+            detail = await check(
                 "silpo_get_category",
                 {
                     "branchId": state["branchId"],
@@ -524,6 +524,19 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 },
                 retries=1,
             )
+            # release-1.111.3: children are gone; path/priceRange/visible instead
+            if isinstance(detail, dict):
+                category = detail.get("category") or {}
+                has_children = "children" in category or "subcategories" in category
+                print(f"  · get_category children present: {has_children} (expect False)")
+                if has_children:
+                    failed += 1
+                else:
+                    passed += 1
+                print(
+                    f"  · category path={_short(category.get('path'))} "
+                    f"priceRange={_short(category.get('priceRange'))} visible={category.get('visible')}"
+                )
     else:
         await check(
             "silpo_get_category",
@@ -804,6 +817,85 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 print(f"  · serviceFee={cart_obj.get('serviceFee')} (release-1.111.1 field present)")
             else:
                 print("  · note: live silpo_get_shopping_cart_by_id has no serviceFee (pre-1.111.1?)")
+            calc = cart_obj.get("calculation") or {}
+            # release-1.111.3: payment method list + delivery discount split
+            payment = calc.get("payment") or {}
+            types = payment.get("types") or []
+            if types:
+                available = [t.get("type") for t in types if isinstance(t, dict) and t.get("available")]
+                blocked = [
+                    f"{t.get('type')}:{_short(t.get('loan'), 90)}"
+                    for t in types
+                    if isinstance(t, dict) and not t.get("available")
+                ]
+                print(
+                    f"  · payment.type={payment.get('type')!r} topLevelPaymentType={cart_obj.get('paymentType')!r} "
+                    f"available={available} blocked={blocked}"
+                )
+                passed += 1
+            else:
+                failed += 1
+                print("  · ✗ calculation.payment.types missing (release-1.111.3 regression?)")
+            delivery = calc.get("delivery") or {}
+            if {"subTotal", "subDiscount"} <= set(delivery):
+                print(
+                    f"  · delivery subTotal={delivery.get('subTotal')} subDiscount={delivery.get('subDiscount')} "
+                    f"total={delivery.get('total')}"
+                )
+                passed += 1
+            else:
+                failed += 1
+                print("  · ✗ calculation.delivery.subTotal/subDiscount missing (release-1.111.3 regression?)")
+            print(
+                f"  · total={calc.get('total')} totalAfterDiscounts={calc.get('totalAfterDiscounts')} "
+                f"certificatesTotal={calc.get('certificatesTotal')}"
+            )
+            # release-1.111.3: address.addressType and shipment companyId/branchId are required
+            address = cart_obj.get("address") or {}
+            shipments = cart_obj.get("shipments") or []
+            print(
+                f"  · update-ready: addressType={address.get('addressType')!r} "
+                f"shipments={[_short(s, 80) for s in shipments]}"
+            )
+
+        # release-1.111.3: address must carry addressType and shipments a
+        # companyId/branchId pair, and both are copied from the cart as-is.
+        update_args: dict[str, Any] = {
+            "shoppingCartId": cart_id,
+            "deliveryType": state["deliveryType"],
+            "timeslot": {"start": state["timeslotStart"], "end": state["timeslotEnd"]},
+            "address": {
+                "addressType": "house",
+                "address": state["address"],
+                "latitude": str(state["latitude"]),
+                "longitude": str(state["longitude"]),
+            },
+            "shipments": [
+                {
+                    "branchId": state["branchId"],
+                    "companyId": state.get("companyId") or "1ec88c5d-a050-669c-8467-570a157f3e31",
+                }
+            ],
+        }
+        live_address = (cart_payload or {}).get("cart", cart_payload) if isinstance(cart_payload, dict) else {}
+        live_address = live_address if isinstance(live_address, dict) else {}
+        if isinstance(live_address.get("address"), dict) and live_address["address"].get("addressType"):
+            update_args["address"] = live_address["address"]
+        live_shipments = [
+            {k: s[k] for k in ("companyId", "branchId") if isinstance(s, dict) and s.get(k)}
+            for s in (live_address.get("shipments") or [])
+        ]
+        live_shipments = [s for s in live_shipments if len(s) == 2]
+        if live_shipments:
+            update_args["shipments"] = live_shipments
+
+        # a hand-built address without addressType must be rejected
+        if live_shipments:
+            await expect_rejected(
+                "silpo_update_shopping_cart",
+                {**update_args, "address": {"address": state["address"]}},
+                expect="address without addressType is rejected (release-1.111.3)",
+            )
 
         if state.get("productId"):
             await check(
@@ -826,28 +918,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 {"shoppingCartId": cart_id, "products": [{"productId": state["productId"]}]},
                 retries=1,
             )
-            await check(
-                "silpo_update_shopping_cart",
-                {
-                    "shoppingCartId": cart_id,
-                    "deliveryType": state["deliveryType"],
-                    "timeslot": {"start": state["timeslotStart"], "end": state["timeslotEnd"]},
-                    "address": {
-                        "address": state["address"],
-                        "latitude": state["latitude"],
-                        "longitude": state["longitude"],
-                    },
-                    "shipments": [
-                        {
-                            "branchId": state["branchId"],
-                            "companyId": state["companyId"],
-                            "deliveryType": state["deliveryType"],
-                            "timeslot": {"start": state["timeslotStart"], "end": state["timeslotEnd"]},
-                        }
-                    ],
-                },
-                retries=1,
-            )
+            await check("silpo_update_shopping_cart", dict(update_args), retries=1)
             await check(
                 "silpo_add_or_update_certificates",
                 {"shoppingCartId": cart_id, "certificatesToAdd": [], "certificatesToRemove": []},
@@ -857,28 +928,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         else:
             await check("silpo_add_or_update_cart_products", {"shoppingCartId": cart_id, "products": []}, retries=1)
             await check("silpo_remove_cart_products", {"shoppingCartId": cart_id, "products": []}, retries=1)
-            await check(
-                "silpo_update_shopping_cart",
-                {
-                    "shoppingCartId": cart_id,
-                    "deliveryType": state["deliveryType"],
-                    "timeslot": {"start": state["timeslotStart"], "end": state["timeslotEnd"]},
-                    "address": {
-                        "address": state["address"],
-                        "latitude": state["latitude"],
-                        "longitude": state["longitude"],
-                    },
-                    "shipments": [
-                        {
-                            "branchId": state["branchId"],
-                            "companyId": state.get("companyId") or "1ec88c5d-a050-669c-8467-570a157f3e31",
-                            "deliveryType": state["deliveryType"],
-                            "timeslot": {"start": state["timeslotStart"], "end": state["timeslotEnd"]},
-                        }
-                    ],
-                },
-                retries=1,
-            )
+            await check("silpo_update_shopping_cart", dict(update_args), retries=1)
             await check(
                 "silpo_add_or_update_certificates",
                 {"shoppingCartId": cart_id, "certificatesToAdd": [], "certificatesToRemove": []},

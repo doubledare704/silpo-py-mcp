@@ -31,6 +31,8 @@ Quick start (against the real server):
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from fastmcp import Client as FastMCPClient
 
 from silpo_py_mcp import auth, config, exceptions, models, tools
@@ -57,17 +59,28 @@ from silpo_py_mcp.models import (
     AvailableDeliveryType,
     BatchProductResult,
     Branch,
+    CartAddressType,
+    CartAmount,
+    CartCalculation,
+    CartDelivery,
     CartItem,
     CartLineInput,
+    CartLoan,
+    CartLoanConfig,
     CartLoyalty,
+    CartPayment,
+    CartPaymentOption,
     CartSummary,
     CartTotals,
+    CartUpdatePayloads,
     CartUpdateResult,
     CartValidation,
     CategoriesTree,
     Category,
     CategoryDetail,
     CategoryNode,
+    CategoryPathItem,
+    CategoryPriceRange,
     Certificate,
     Coupon,
     CouponDetail,
@@ -101,10 +114,16 @@ from silpo_py_mcp.models import (
     SilpoProduct,
     SubscriptionFeature,
     TimeSlot,
+    TimeSlotDeliveryType,
+    UpdateCartDeliveryType,
 )
 from silpo_py_mcp.tools import SilpoTool
 
-__version__ = "0.5.2"
+#: Read from the installed distribution so it cannot drift from pyproject.toml.
+try:
+    __version__ = version("silpo-py-mcp")
+except PackageNotFoundError:  # running from a source checkout, not installed
+    __version__ = "0.0.0.dev0"
 
 __all__ = [
     "SILPO_MCP_URL",
@@ -112,17 +131,28 @@ __all__ = [
     "AvailableDeliveryType",
     "BatchProductResult",
     "Branch",
+    "CartAddressType",
+    "CartAmount",
+    "CartCalculation",
+    "CartDelivery",
     "CartItem",
     "CartLineInput",
+    "CartLoan",
+    "CartLoanConfig",
     "CartLoyalty",
+    "CartPayment",
+    "CartPaymentOption",
     "CartSummary",
     "CartTotals",
+    "CartUpdatePayloads",
     "CartUpdateResult",
     "CartValidation",
     "CategoriesTree",
     "Category",
     "CategoryDetail",
     "CategoryNode",
+    "CategoryPathItem",
+    "CategoryPriceRange",
     "Certificate",
     "Coupon",
     "CouponDetail",
@@ -170,6 +200,8 @@ __all__ = [
     "SilpoValidationError",
     "SubscriptionFeature",
     "TimeSlot",
+    "TimeSlotDeliveryType",
+    "UpdateCartDeliveryType",
     "__version__",
     "auth",
     "build_encrypted_token_storage",

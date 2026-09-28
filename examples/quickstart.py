@@ -59,28 +59,27 @@ async def main() -> None:
 
         # 5. Offer/apply bonuses (documented workflow)
         loyalty = updated.cart.loyalty
-        if loyalty.bonus_available > 0 and loyalty.bonus_requested is None:
+        if loyalty.can_offer_bonuses:
             print(f"[loyalty] {loyalty.bonus_available:.1f} балабонусів available — applying all.")
+            # release-1.111.3: address and shipments are copied from the cart
+            # as-is — never hand-built — so read them off update_payloads.
+            payloads = updated.cart.update_payloads
             updated = await client.update_shopping_cart(
                 cart.cart_id,
                 updated.cart.delivery_type,
-                {"start": timeslot_start, "end": timeslot_end},
-                {"address": address.text},
-                [
-                    {
-                        "branchId": updated.cart.branch_id,
-                        "companyId": "co-1",
-                        "deliveryType": updated.cart.delivery_type,
-                        "timeslot": {"start": timeslot_start, "end": timeslot_end},
-                    }
-                ],
+                payloads.timeslot,
+                payloads.address,
+                payloads.shipments,
                 bonus_requested=loyalty.bonus_available,
             )
-            print(f"[cart] after bonuses — total {updated.cart.totals.total_price} UAH")
+            print(f"[cart] after bonuses — total {updated.cart.total_to_pay} UAH")
 
         # 6. Validate delivery slot and show checkout links
         slots = await client.get_time_slots(updated.cart.branch_id, delivery_types=[updated.cart.delivery_type])
-        print(f"[slots] {len(slots)} available; first starts {slots[0].starts_at}")
+        bookable = [s for s in slots if s.is_bookable]
+        print(f"[slots] {len(bookable)}/{len(slots)} bookable; first starts {slots[0].starts_at} (UTC)")
+        print(f"[payment] available: {updated.cart.available_payment_types}")
+        print(f"[payment] blocked:   {updated.cart.payment.unavailable_types}")
         print(f"[checkout] web:  {updated.cart.checkout_web_link}")
         print(f"[checkout] mobile: {updated.cart.checkout_mobile_link}")
 

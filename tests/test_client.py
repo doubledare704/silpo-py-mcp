@@ -267,19 +267,17 @@ async def test_full_cart_workflow(client: SilpoClient) -> None:
         cart_id,
         "DeliveryHome",
         {"start": TS, "end": TE},
-        {"address": "Київ, вул. Центральна"},
+        {"addressType": "house", "address": "Київ, вул. Центральна"},
         [
             {
                 "branchId": "bran-1",
                 "companyId": "co-1",
-                "deliveryType": "DeliveryHome",
-                "timeslot": {"start": TS, "end": TE},
             }
         ],
         bonus_requested=25.0,
     )
     assert updated.cart.loyalty.bonus_applied == 25.0
-    assert updated.cart.address == {"address": "Київ, вул. Центральна"}
+    assert updated.cart.address == {"addressType": "house", "address": "Київ, вул. Центральна"}
 
     removed = await client.remove_cart_products(cart_id, ["prd-bread"])
     assert len(removed.cart.items) == 1
@@ -384,10 +382,17 @@ async def test_certificates_accept_barcode_dicts(client: SilpoClient) -> None:
     assert result.removed == []
 
 
-async def test_category_children_map_to_subcategories(client: SilpoClient) -> None:
-    detail = await client.get_category("bran-1", "DeliveryHome", "molochni")
-    assert detail.category.slug == "molochni"
-    assert [c.slug for c in detail.subcategories] == ["yaytsya"]
+async def test_category_has_path_and_no_children(client: SilpoClient) -> None:
+    """release-1.111.3: children are gone; the response carries path/priceRange/visible."""
+    detail = await client.get_category("bran-1", "DeliveryHome", "yaytsya")
+    assert detail.category.slug == "yaytsya"
+    assert [item.slug for item in detail.path] == ["molochni", "yaytsya"]
+    assert detail.price_range == detail.category.price_range
+    assert detail.price_range is not None
+    assert detail.price_range.min <= detail.price_range.max
+    assert detail.is_visible is True
+    assert detail.has_products is True
+    assert not hasattr(detail, "subcategories")
 
 
 async def test_online_order_live_shape(client: SilpoClient) -> None:
@@ -503,9 +508,262 @@ async def test_cart_carries_service_fee(client: SilpoClient) -> None:
         cart_id,
         "SelfPickup",
         {"start": TS, "end": TE},
-        {"address": "Київ, вул. Центральна"},
-        [],
+        {"addressType": "self-pickup", "city": "Львів"},
+        [{"companyId": "co-1", "branchId": "bran-1"}],
     )
     assert updated.cart.service_fee == 15.0
     refetched = await client.get_cart_by_id(cart_id)
     assert refetched.service_fee == 15.0
+
+
+async def test_cart_payment_types_and_delivery_discount(client: SilpoClient) -> None:
+    """release-1.111.3: payment method list + delivery discount split."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    await client.add_or_update_cart_products(
+        cart_id,
+        [{"productId": "prd-cheese", "companyId": "co-2", "branchId": "bran-1", "quantity": 1}],
+    )
+    fetched = await client.get_cart_by_id(cart_id)
+
+    # payment.types is the authoritative list; paymentType only reflects the selection
+    assert fetched.payment.type == "Unknown"
+    assert fetched.payment_type == "Unknown"
+    assert "Card" in fetched.available_payment_types
+    assert fetched.payment.is_available("card") is True
+    assert fetched.payment.is_available("Nonexistent") is False
+    assert fetched.payment.option("BNPL") is not None
+
+    # delivery discount: subTotal - subDiscount == total
+    assert fetched.delivery.total == fetched.delivery.sub_total - fetched.delivery.sub_discount
+    assert fetched.totals.delivery_discount == fetched.delivery.sub_discount
+    assert fetched.totals.delivery_sub_total == fetched.delivery.sub_total
+
+    # total is before discounts, total_after_discounts is what the guest pays
+    assert fetched.total_to_pay == fetched.totals.total_after_discounts
+    assert fetched.calculation is not None
+    assert fetched.calculation.payment.types == fetched.payment.types
+
+
+async def test_bnpl_unavailable_below_minimum(client: SilpoClient) -> None:
+    """release-1.111.3: BNPL is blocked under loanConfig.minTotal."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    fetched = await client.get_cart_by_id(cart_id)
+
+    assert "BNPL" in fetched.payment.unavailable_types
+    assert fetched.payment.is_available("BNPL") is False
+    assert fetched.payment.loan is not None
+    assert fetched.payment.loan.loan_config is not None
+    assert fetched.payment.loan.loan_config.min_total == 1000.0
+    # the same reason is echoed as a validation with a stable dot-namespaced id
+    assert any(v.message == "order.payment_types.disabled" for v in fetched.validations)
+
+
+async def test_cart_update_payloads_round_trip(client: SilpoClient) -> None:
+    """release-1.111.3: address/shipments are copied from the cart, not built."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    fetched = await client.get_cart_by_id(cart_id)
+
+    payloads = fetched.update_payloads
+    assert payloads.is_sendable is True
+    assert payloads.missing_fields == []
+    assert payloads.address["addressType"] == "house"
+    assert payloads.shipments == [{"companyId": "co-1", "branchId": "bran-1"}]
+    assert set(payloads.timeslot) == {"start", "end"}
+
+    # the payloads are directly reusable as update_shopping_cart arguments
+    await client.update_shopping_cart(
+        cart_id,
+        payloads.delivery_type,
+        payloads.timeslot,
+        payloads.address,
+        payloads.shipments,
+    )
+
+
+def test_cart_update_payloads_records_missing_fields() -> None:
+    """A cart without addressType/shipments is reported, not silently sent."""
+    cart = SilpoCart(cart_id="c1", address={"address": "вул. Хрещатик, 1"}, shipments=[])
+    payloads = cart.update_payloads
+    assert payloads.is_sendable is False
+    assert "address.addressType" in payloads.missing_fields
+    assert "shipments" in payloads.missing_fields
+    assert "timeslot" in payloads.missing_fields
+
+
+async def test_update_cart_rejects_address_without_type(client: SilpoClient) -> None:
+    """release-1.111.3: addressType is required and validated client-side."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    with pytest.raises(ValueError, match="addressType"):
+        await client.update_shopping_cart(
+            cart_id,
+            "DeliveryHome",
+            {"start": TS, "end": TE},
+            {"address": "Київ, вул. Центральна"},
+            [{"companyId": "co-1", "branchId": "bran-1"}],
+        )
+
+
+async def test_update_cart_rejects_incomplete_shipments(client: SilpoClient) -> None:
+    """release-1.111.3: every shipment needs companyId and branchId."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    with pytest.raises(ValueError, match="shipments\\[0\\] is missing branchId"):
+        await client.update_shopping_cart(
+            cart_id,
+            "DeliveryHome",
+            {"start": TS, "end": TE},
+            {"addressType": "house"},
+            [{"companyId": "co-1"}],
+        )
+
+
+async def test_update_cart_rejects_non_schedulable_delivery_type(client: SilpoClient) -> None:
+    """release-1.111.3: only the eight schedulable types are accepted."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    with pytest.raises(ValueError, match="deliveryType='JustIn'"):
+        await client.update_shopping_cart(
+            cart_id,
+            "JustIn",
+            {"start": TS, "end": TE},
+            {"addressType": "house"},
+            [{"companyId": "co-1", "branchId": "bran-1"}],
+        )
+
+
+async def test_update_cart_rejects_empty_shipments(client: SilpoClient) -> None:
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    with pytest.raises(ValueError, match="at least one shipments entry"):
+        await client.update_shopping_cart(
+            cart_id, "DeliveryHome", {"start": TS, "end": TE}, {"addressType": "house"}, []
+        )
+
+
+async def test_update_cart_rejects_incomplete_timeslot(client: SilpoClient) -> None:
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    with pytest.raises(ValueError, match=r"timeslot\.start and timeslot\.end"):
+        await client.update_shopping_cart(
+            cart_id,
+            "DeliveryHome",
+            {"start": TS},
+            {"addressType": "house"},
+            [{"companyId": "co-1", "branchId": "bran-1"}],
+        )
+
+
+async def test_update_cart_clear_bonus(client: SilpoClient) -> None:
+    """release-1.111.3: bonusRequested is nullable, so it can be removed.
+
+    Asserted on the wire: the mock cannot tell an explicit ``null`` from an
+    omitted argument, so the client's job is to send the ``null``.
+    """
+    captured: list[dict[str, Any]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append(dict(arguments))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    payloads = (await client.get_cart_by_id(cart_id)).update_payloads
+
+    await client.update_shopping_cart(
+        cart_id,
+        payloads.delivery_type,
+        payloads.timeslot,
+        payloads.address,
+        payloads.shipments,
+        bonus_requested=10.0,
+    )
+    assert captured[-1]["bonusRequested"] == 10.0
+
+    await client.update_shopping_cart(
+        cart_id,
+        payloads.delivery_type,
+        payloads.timeslot,
+        payloads.address,
+        payloads.shipments,
+        clear_bonus=True,
+    )
+    assert "bonusRequested" in captured[-1]
+    assert captured[-1]["bonusRequested"] is None
+
+    # without either flag the key is omitted entirely
+    await client.update_shopping_cart(
+        cart_id,
+        payloads.delivery_type,
+        payloads.timeslot,
+        payloads.address,
+        payloads.shipments,
+    )
+    assert "bonusRequested" not in captured[-1]
+
+
+async def test_cart_loyalty_can_offer_bonuses(client: SilpoClient) -> None:
+    """Bonus prompt only makes sense before a request is made."""
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    fetched = await client.get_cart_by_id(cart_id)
+    assert fetched.loyalty.can_offer_bonuses is True
+    assert fetched.loyalty.bonus_total >= fetched.loyalty.bonus_available
+
+
+async def test_find_products_batch_reports_total_found(client: SilpoClient) -> None:
+    """release-1.111.3: queries[].totalFound survives as total_found."""
+    batch: BatchProductResult = await client.find_products_batch("bran-1", "DeliveryHome", TS, TE, ["молоко"], limit=1)
+    assert "молоко" in batch.total_found
+    assert batch.total_found["молоко"] >= len(batch.results.get("молоко", []))
+    assert batch.is_truncated("молоко") == (batch.total_found["молоко"] > len(batch.results.get("молоко", [])))
+    assert batch.truncated_queries == (["молоко"] if batch.is_truncated("молоко") else [])
+
+
+async def test_time_slot_bookable_flag(client: SilpoClient) -> None:
+    """release-1.111.3: availability is per slot, independent of pricing."""
+    slots: list[TimeSlot] = await client.get_time_slots("bran-1", delivery_type="SelfPickup", limit=5)
+    assert slots
+    for slot in slots:
+        assert slot.is_bookable == slot.is_available
+    assert all(slot.min_order_cost is not None for slot in slots)
+    # serviceFee is a preview; the cart's calculation.serviceFee is authoritative
+    assert all(slot.service_fee is not None for slot in slots)
+
+
+async def test_cart_mutation_result_carries_payment_data(client: SilpoClient) -> None:
+    """A cart echoed back by a mutation is interchangeable with a re-read.
+
+    The mock returns the whole cart from every write tool; the release-1.111.3
+    payment/delivery fields must be lifted on that path too, not only on
+    ``get_cart_by_id``.
+    """
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    result = await client.add_or_update_cart_products(
+        cart_id,
+        [{"productId": "prd-cheese", "companyId": "co-2", "branchId": "bran-1", "quantity": 1}],
+    )
+    assert result.cart.payment.types
+    assert "Card" in result.cart.available_payment_types
+    assert result.cart.delivery.total == 0.0
+    assert result.cart.calculation is not None
+    assert result.cart.calculation.total == result.cart.totals.total_price
+    assert result.cart.validations

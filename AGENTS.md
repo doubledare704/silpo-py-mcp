@@ -122,9 +122,13 @@ Key design decisions:
   re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
   changes; reconciled with server release-1.111.0/1.111.1 on Sep 25 2026 —
   still 40 tools, no renames; reconciled with server release-1.111.2 on
-  Sep 28 2026 — still 40 tools, no renames, no required-set changes; plus
-  the release-1.110.0 `silpo_get_product_details` output fix
-  below).
+  Sep 28 2026 — still 40 tools, no renames, no required-set changes;
+  reconciled with server release-1.111.3 on Sep 28 2026 — still 40 tools,
+  no renames, no required-set changes; `silpo_get_category` dropped
+  `children`, `silpo_get_shopping_cart_by_id` gained the payment-type list
+  and delivery-discount fields, `silpo_update_shopping_cart` tightened its
+  schema, and the `get_time_slots` / product-object descriptions were
+  reworked (all below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
@@ -195,6 +199,67 @@ Key design decisions:
   by the requested window. `silpo_create_shopping_cart` requires `addressType`
   (`house`/`flat`/`office`/`point`/`self-pickup`/`nova-poshta`) — the smoke
   fills it and probes that write tool once (a second call is rate-limited).
+- **Release-1.111.3 changes (client 0.8.0).**
+  - **`silpo_get_category` dropped `children`** (breaking: the upstream API
+    never returns child categories for this endpoint). `CategoryDetail.
+    subcategories` is removed; `get_category` no longer remaps `children`.
+    The response instead carries the ancestor `path`, a `priceRange` and a
+    `visible` flag, modelled as `Category.path`/`CategoryPriceRange`/
+    `Category.visible` and surfaced on `CategoryDetail` as `path`/
+    `price_range`/`is_visible`/`has_products` (`visible is False` = no
+    products at that branch — don't browse it). Use
+    `silpo_get_categories_tree` to discover children. The mock builds a real
+    breadcrumb by walking `parentId`.
+  - **Cart payment types** (breaking shape change): `calculation.payment` is
+    `{type, types: [{type, available, loan}], loan}` and is parsed into
+    `CartPayment` on `SilpoCart.payment`. `payment.available_types`/
+    `unavailable_types`/`is_available()`/`option()` are the read helpers; the
+    BNPL block reason is `payment.loan.loan_config.min_total` (live ₴1000),
+    echoed as the `order.payment_types.disabled` validation. The top-level
+    `cart.paymentType` is only the *selected* method and stays `"Unknown"`
+    until checkout — never present it as the list of options. The mock returns
+    the same eight methods with BNPL gated on its total.
+  - **Cart delivery discount**: `calculation.delivery` is
+    `{total, subTotal, subDiscount, totalWeight, deliveryExpressByPromise}`,
+    parsed into `CartDelivery` on `SilpoCart.delivery` and mirrored onto
+    `CartTotals.delivery_sub_total`/`delivery_discount`/`delivery_price`.
+    `sub_total - sub_discount == total`; the *reason* is not reported (both
+    order-total tiers and premium-subscription perks can discount delivery),
+    so do not infer tier logic. `calculation.total` is before discounts —
+    `SilpoCart.total_to_pay` (`calculation.totalAfterDiscounts`) is what the
+    guest pays and is the number to show.
+  - **`calculation` is now typed** as `CartCalculation` instead of a raw
+    dict; `_apply_live_calculation` lifts payment/delivery/validations/loyalty
+    onto the top level and is applied to *both* the wrapped live response and
+    the flat mock cart so the two stay interchangeable.
+  - **`silpo_update_shopping_cart` schema** (breaking): `address` requires
+    `addressType` (new `CartAddressType` enum) and each `shipments` entry a
+    `companyId`+`branchId` pair; `deliveryType` is narrowed to the 8-value
+    `UpdateCartDeliveryType` (a third enum, alongside `DeliveryType` and
+    `TimeSlotDeliveryType`). The server wants both objects copied verbatim
+    from the cart — `SilpoCart.update_payloads` returns them
+    (`CartUpdatePayloads`, with `missing_fields`/`is_sendable` when the cart
+    lacks them). `update_shopping_cart` validates delivery type, `addressType`,
+    shipments and the timeslot bounds client-side with a `ValueError` naming
+    the offending argument, and `clear_bonus=True` sends the explicit
+    `bonusRequested: null` that removes bonus payment. The mock enforces the
+    same rules. Caveat: a mock tool function cannot distinguish an explicit
+    `null` from an omitted argument, so the mock leaves `bonusRequested`
+    untouched on `null` — test that path on the wire, not via mock state.
+  - **Time slots / product docs clarified** (documentation + one new field,
+    no schema change): all slot times are **UTC**; `available` is
+    authoritative — a type can report real `deliveryCost`/`minOrderCost` while
+    every slot is `available: false`, so filter on `TimeSlot.is_bookable`;
+    `minOrderCost` is reported only by `get_time_slots`; `serviceFee` there is
+    a preview that `calculation.serviceFee.total` supersedes once a cart
+    exists. For `weighted=True` products `step` and the cart `quantity` are
+    **always kilograms**, whatever `displayRatio` shows.
+  - `queries[].totalFound` now survives as `BatchProductResult.total_found`,
+    with `truncated_queries`/`is_truncated()` flagging queries whose real match
+    count exceeded the returned products.
+  - `__version__` is read from the installed distribution metadata instead of
+    being hardcoded — it had silently drifted to `0.5.2` while the package was
+    at `0.7.0`. Never hardcode it again.
 - **Release-1.110.0 `silpo_get_product_details` fix.** The server no longer
   returns stale catalog-wide `displayPrice`/`price` — pricing and
   availability are the requested branch's real offer, with an explicit
