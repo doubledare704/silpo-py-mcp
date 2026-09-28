@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from fastmcp import FastMCP
 from fastmcp.server.context import Context
+
+from silpo_py_mcp.models import TimeSlotDeliveryType
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -292,6 +295,23 @@ NOVA_POSHTA_OFFICES = [
 # ---------------------------------------------------------------------------
 
 
+def _parse_slot_bound(value: str, field: str) -> datetime:
+    """Normalize a ``start``/``end`` bound the way release-1.111.2 does.
+
+    ``Z``/``+00:00`` offsets and naive local stamps are read as UTC;
+    date-only and unparseable values are rejected (the live server answers
+    with a bare ``400 Bad Request``).
+    """
+    normalized = re.sub(r"\.\d+(?=(Z|[+-]\d{2}:?\d{2}|$))", "", value)
+    try:
+        if "T" not in normalized:
+            raise ValueError
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        raise ValueError(f"API returned 400 Bad Request: {field}={value!r} is not a valid ISO date-time") from None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+
+
 class SilpoMockServer:
     """FastMCP server that emulates the Silpo MCP endpoint in-memory."""
 
@@ -485,23 +505,36 @@ class SilpoMockServer:
             """Return available delivery time slots for a branch.
 
             Mirrors server release-1.111.0 (no duplicate slots; singular
-            ``deliveryType`` accepted as an alias for ``deliveryTypes``) and
+            ``deliveryType`` accepted as an alias for ``deliveryTypes``),
             release-1.111.1 (millisecond timestamps accepted; each slot
-            carries ``serviceFee`` — the SelfPickup "Сервісний збір" fee).
+            carries ``serviceFee`` — the SelfPickup "Сервісний збір" fee) and
+            release-1.111.2 (timeslot bounds are normalized — ``Z``,
+            ``+00:00`` and naive stamps are read as UTC, date-only values are
+            rejected; ``deliveryTypes`` is restricted to the 9-value enum and
+            ``limit`` must be between 1 and 100).
             """
-            _ = (limit, start, end)
+            if limit is not None and not 1 <= limit <= 100:
+                raise ValueError(f"limit must be between 1 and 100, got {limit}")
             types = deliveryTypes or ([deliveryType] if deliveryType else [])
-            dtype = types[0] if types else "DeliveryHome"
+            accepted = [member.value for member in TimeSlotDeliveryType]
+            invalid = [t for t in types if t not in accepted]
+            if invalid:
+                raise ValueError(
+                    f"Invalid option for deliveryTypes: expected one of {'|'.join(accepted)}; got {invalid}"
+                )
+            dtype = types[0] if types else "SelfPickup"
             service_fee = 15.0 if dtype == "SelfPickup" else 0.0
+            start_at = _parse_slot_bound(start, "start") if start is not None else None
+            end_at = _parse_slot_bound(end, "end") if end is not None else None
             slots = [
                 {
                     "id": f"slot-{i}",
                     "deliveryType": dtype,
                     "branchId": branchId,
-                    "startsAt": f"2026-09-02T0{i + 8}:00:00Z",
-                    "endsAt": f"2026-09-02T0{i + 10}:00:00Z",
-                    "start": f"2026-09-02T0{i + 8}:00:00Z",
-                    "end": f"2026-09-02T0{i + 10}:00:00Z",
+                    "startsAt": f"2026-09-02T{i + 8:02d}:00:00+00:00",
+                    "endsAt": f"2026-09-02T{i + 10:02d}:00:00+00:00",
+                    "start": f"2026-09-02T{i + 8:02d}:00:00+00:00",
+                    "end": f"2026-09-02T{i + 10:02d}:00:00+00:00",
                     "price": 0.0 if i == 0 else 45.0,
                     "deliveryCost": 0.0 if i == 0 else 45.0,
                     "deliveryCostMap": [
@@ -523,7 +556,11 @@ class SilpoMockServer:
                 }
                 for i in range(3)
             ]
-            return slots
+            if start_at is not None:
+                slots = [s for s in slots if datetime.fromisoformat(s["start"]) >= start_at]
+            if end_at is not None:
+                slots = [s for s in slots if datetime.fromisoformat(s["start"]) < end_at]
+            return slots[:limit] if limit is not None else slots
 
         @self._fastmcp.tool
         def silpo_find_nova_poshta_settlements(title: str) -> list[dict[str, Any]]:

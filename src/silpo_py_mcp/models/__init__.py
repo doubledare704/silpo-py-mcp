@@ -12,6 +12,7 @@ from .branch import (
     NovaPoshtaOffice,
     NovaPoshtaSettlement,
     TimeSlot,
+    TimeSlotDeliveryType,
 )
 from .cart import (
     CartItem,
@@ -110,4 +111,5 @@ __all__ = [
     "SilpoProduct",
     "SubscriptionFeature",
     "TimeSlot",
+    "TimeSlotDeliveryType",
 ]

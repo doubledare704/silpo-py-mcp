@@ -94,7 +94,10 @@ asyncio.run(main())
 > 2026; reconciled with server release-1.110.1 on Sep 11 2026;
 > re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
 > changes; reconciled with server release-1.111.0/1.111.1 on Sep 25 2026 —
-> still 40 tools, no renames). Context
+> still 40 tools, no renames; reconciled with server release-1.111.2 on
+> Sep 28 2026 — still 40 tools, no renames; `silpo_get_time_slots` normalizes
+> timeslot bounds and its `deliveryTypes` enum is now the narrower
+> `TimeSlotDeliveryType` (9 values, `B2B` accepted again)). Context
 > arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them — since 1.110.1 this includes
@@ -114,7 +117,12 @@ asyncio.run(main())
 > `get_time_slots` sends `deliveryTypes` (singular `deliveryType` accepted
 > server-side as an alias since 1.111.0; millisecond timestamps stripped
 > since 1.111.1) and each slot carries `serviceFee` (SelfPickup "Сервісний
-> збір"); `find_address` surfaces `warning`/`houseNumberMatched` for
+> збір"); since release-1.111.2 the server normalizes timeslot bounds
+> (`Z`, `+00:00` and naive stamps are all read as UTC, date-only values are
+> rejected) and restricts `deliveryTypes` to the 9-value
+> `TimeSlotDeliveryType` enum — `get_time_slots` validates the types, the
+> `limit` bounds (1..100) and the timestamp format client-side instead of
+> letting the server answer `-32602`/400; `find_address` surfaces `warning`/`houseNumberMatched` for
 > unmatched house numbers (release-1.111.1 — check before relying on
 > coordinates); `get_available_delivery_types` coordinates are only validated
 > for home-delivery types (`SelfPickup`/`NovaPoshta` always returned);
@@ -162,13 +170,15 @@ non-zero if the tool-name contract is violated or a battery call fails.
 |---|---|---|
 | `silpo_get_products` | `400 Bad Request` on plain `limit` without filter (pre-1.111.0; now a clear message listing `category`/`mustHavePromotion`/`promotionCode`/`set`) | smoke uses `category` or `set: klatsniznyzhky`; typed `get_products` raises `ValueError` before the request |
 | `silpo_get_products` | bogus `timeslotStart`/`timeslotEnd` silently returns the full catalog (documented 1.111.0, not validated) | always pass a real slot from `get_time_slots` |
-| `silpo_get_time_slots` | `-32602` for `deliveryTypes: ["B2B"]` | smoke filters `B2B` from `get_available_delivery_types` |
+| `silpo_get_time_slots` | date-only `start`/`end` (`"2026-09-02"`) answers with a bare `400 Bad Request` (release-1.111.2 normalization) | typed `get_time_slots` raises `ValueError` before the request; always pass a full timestamp |
 | `silpo_get_my_favorites` | `Cannot read properties of null (reading 'id')` — a corrupted favorites entry on the server side. The typed `get_favorites()` raises `SilpoToolExecutionError`; it is **not** a client/model drift. | smoke treats it as skipped; until Silpo fixes it, wrap `get_favorites()` in `try/except SilpoToolExecutionError` or use `call_tool("silpo_get_my_favorites", ...)` and handle the failure |
 | `silpo_get_product_details` | `slug: null` chain failure | resolved once `get_products` returns real slugs |
 
 Previously reported quirks that no longer reproduce (re-verified live, Sep 2026):
 `silpo_get_category` no longer triggers the fastmcp `id` rejection (it validates
-cleanly), and `silpo_get_my_certificates` — although still intermittently returning
+cleanly), `silpo_get_time_slots` accepts `deliveryTypes: ["B2B"]` again
+(release-1.111.2 put it back in the enum — it returns an empty slot list), and
+`silpo_get_my_certificates` — although still intermittently returning
 HTTP 500 — now responds with a normal `certificates` envelope (unwrapped by the
 client) that validates cleanly when it does respond.
 

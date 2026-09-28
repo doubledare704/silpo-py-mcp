@@ -17,11 +17,13 @@ from silpo_py_mcp.models import (
     Category,
     Coupon,
     CreateShoppingCartResult,
+    DeliveryType,
     LoyaltyInfo,
     ProductSearchResult,
     SilpoCart,
     SilpoProduct,
     TimeSlot,
+    TimeSlotDeliveryType,
 )
 
 TS = "2026-09-06T10:00:00+03:00"
@@ -68,7 +70,16 @@ async def test_location_group(client: SilpoClient) -> None:
         start="2026-09-02T10:00:00.123Z",
         end="2026-09-02T12:00:00.000Z",
     )
-    assert len(millis) == 3
+    assert [s.starts_at for s in millis] == ["2026-09-02T10:00:00+00:00"]
+
+    naive = await client.get_time_slots(
+        "bran-1",
+        delivery_type="DeliveryHome",
+        start="2026-09-02T08:00:00",
+        end="2026-09-02T09:00:00",
+    )
+    assert len(naive) == 1
+    assert naive[0].starts_at == "2026-09-02T08:00:00+00:00"
 
     settlements = await client.find_nova_poshta_settlements("Київ")
     assert settlements[0].name == "Київ"
@@ -437,6 +448,47 @@ async def test_get_products_strips_millisecond_timestamps(client: SilpoClient) -
     by_name = {name: args for name, args in captured}
     assert by_name["silpo_get_products"]["timeslotStart"] == "2026-09-06T10:00:00+03:00"
     assert by_name["silpo_get_products"]["timeslotEnd"] == "2026-09-06T11:00:00+03:00"
+
+
+async def test_get_time_slots_rejects_values_outside_live_enum(client: SilpoClient) -> None:
+    """release-1.111.2: deliveryTypes enum narrowed; B2B is accepted again."""
+    for value in TimeSlotDeliveryType:
+        slots = await client.get_time_slots("bran-1", delivery_type=value.value)
+        assert slots[0].delivery_type == value.value
+
+    outside = {member.value for member in DeliveryType} - {member.value for member in TimeSlotDeliveryType}
+    assert outside
+    for value in sorted(outside):
+        with pytest.raises(ValueError, match=r"release-1\.111\.2 enum"):
+            await client.get_time_slots("bran-1", delivery_types=[value])
+
+
+async def test_get_time_slots_validates_limit_and_bounds(client: SilpoClient) -> None:
+    """release-1.111.2: limit is 1..100 and date-only bounds are rejected."""
+    for bad_limit in (0, 101):
+        with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+            await client.get_time_slots("bran-1", delivery_type="SelfPickup", limit=bad_limit)
+
+    for bad_bound in ("2026-09-02", "garbage"):
+        with pytest.raises(ValueError, match="not a valid ISO date-time"):
+            await client.get_time_slots("bran-1", delivery_type="SelfPickup", start=bad_bound)
+
+    captured: list[dict[str, Any]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append(dict(arguments))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+    await client.get_time_slots(
+        "bran-1",
+        delivery_type="SelfPickup",
+        start="2026-09-02T08:00:00.123Z",
+        end="2026-09-02T10:00:00",
+    )
+    assert captured[0]["start"] == "2026-09-02T08:00:00Z"
+    assert captured[0]["end"] == "2026-09-02T10:00:00"
 
 
 async def test_cart_carries_service_fee(client: SilpoClient) -> None:

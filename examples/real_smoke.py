@@ -60,6 +60,11 @@ EXPECTED_TOOLS: list[str] = [
     "silpo_get_my_premium_subscription",
 ]
 
+# Tools the battery never calls directly; they are probed from the live schema
+# with filled arguments. Write tools are probed once — a second call is
+# rate-limited server-side.
+WRITE_TOOLS: set[str] = {"silpo_create_shopping_cart"}
+
 TEST_LOCATION = {
     "latitude": 50.40895681476332,
     "longitude": 30.62580320767134,
@@ -171,6 +176,9 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                         call_args[req] = state["deliveryType"]
                     elif req == "deliveryTypes" and state.get("deliveryType"):
                         call_args[req] = [state["deliveryType"]]
+                    elif req == "addressType":
+                        # release-1.111.2 schema: house|flat|office|point|self-pickup|nova-poshta
+                        call_args[req] = "self-pickup" if state.get("deliveryType") == "SelfPickup" else "house"
                     elif req == "shoppingCartId" and state.get("shoppingCartId"):
                         call_args[req] = state["shoppingCartId"]
                     elif req == "limit":
@@ -247,6 +255,17 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
             print(f"  ✓ {name}: {_short(payload)}")
             return payload
         return None
+
+    async def expect_rejected(name: str, args: dict[str, Any], *, expect: str) -> bool:
+        """Call a tool expecting a rejection; an expected failure is not a battery failure."""
+        print(f"  → {name} args={args}")
+        try:
+            await holder["client"].call_tool(name, args)
+        except Exception as exc:
+            print(f"  · rejected as expected ({expect}): {str(exc)[:140]}")
+            return True
+        print(f"  · note: accepted — {expect} no longer holds")
+        return False
 
     # -- bootstrap: branches + delivery + slots -----------------------------
     branches_payload = await check("silpo_list_branches", {"limit": 5}, retries=1)
@@ -393,6 +412,30 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         )
         if millis_payload is not None:
             print("  · millisecond timestamps accepted (release-1.111.1 fix present)")
+        # release-1.111.2: timeslot bounds are normalized (Z / +00:00 / naive all read as UTC)
+        naive_payload = await check(
+            "silpo_get_time_slots",
+            {
+                "branchId": state["branchId"],
+                "deliveryTypes": [state["deliveryType"]],
+                "start": "2026-09-02T10:00:00",
+                "end": "2026-09-02T12:00:00",
+            },
+            retries=1,
+        )
+        if naive_payload is not None:
+            print("  · naive (offset-less) bounds accepted and normalized (release-1.111.2)")
+        await expect_rejected(
+            "silpo_get_time_slots",
+            {"branchId": state["branchId"], "deliveryTypes": [state["deliveryType"]], "start": "2026-09-02"},
+            expect="date-only bounds are rejected",
+        )
+        for value in ("Unknown", "JustIn"):
+            await expect_rejected(
+                "silpo_get_time_slots",
+                {"branchId": state["branchId"], "deliveryTypes": [value]},
+                expect=f"deliveryTypes={value} is outside the enum",
+            )
 
     state.setdefault("limit", 5)
     state.setdefault("offset", 0)
@@ -526,7 +569,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
     # -- product search (7) ------------------------------------------------
     # release-1.111.0: get_products without a filter returns a clear message
     # listing category/mustHavePromotion/promotionCode/set (was a raw 400)
-    no_filter = await check(
+    no_filter_rejected = await expect_rejected(
         "silpo_get_products",
         {
             "branchId": state["branchId"],
@@ -535,12 +578,12 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
             "timeslotEnd": state["timeslotEnd"],
             "limit": 5,
         },
-        retries=0,
+        expect="get_products without a filter is rejected (release-1.111.0)",
     )
-    if no_filter is None:
-        print("  · no-filter get_products rejected as expected (check message lists accepted filters)")
+    if no_filter_rejected:
+        passed += 1
     else:
-        print(f"  · note: no-filter get_products unexpectedly succeeded: {_short(no_filter)}")
+        failed += 1
     prod_category = state.get("category") or state.get("categorySlug") or "shokoladni-figurky-524"
     products = await check(
         "silpo_get_products",
@@ -906,6 +949,9 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
     if missing_calls:
         print(f"\n  · coverage gap: {missing_calls} — probing with empty args")
         for name in missing_calls:
+            if name in WRITE_TOOLS:
+                await check(name, _filter_args(name, ctx()), retries=1)
+                continue
             await check(name, {}, retries=1)
             await check(name, _filter_args(name, ctx()), retries=1)
 

@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 from fastmcp import Client as FastMCPClient
@@ -73,6 +74,7 @@ from silpo_py_mcp.models import (
     SilpoModel,
     SilpoProduct,
     TimeSlot,
+    TimeSlotDeliveryType,
 )
 from silpo_py_mcp.tools import SilpoTool
 
@@ -93,6 +95,30 @@ def _strip_millis(value: str) -> str:
     keeps the client compatible with older servers and avoids surprises.
     """
     return _MILLIS_RE.sub("", value)
+
+
+def _normalize_slot_bound(value: str, *, field: str) -> str:
+    """Validate and normalize a ``get_time_slots`` ``start``/``end`` bound.
+
+    Since release-1.111.2 the server normalizes timeslot bounds itself: ``Z``
+    suffixes, explicit ``+00:00`` offsets and naive local stamps are all
+    accepted and interpreted as UTC, while a date-only value or anything
+    unparseable is rejected upstream with a bare ``400``. Validating here
+    turns that into an actionable error and rejects date-only input before
+    the request (the server has no time component to normalize).
+    """
+    normalized = _strip_millis(value)
+    try:
+        if "T" not in normalized:
+            raise ValueError
+        datetime.fromisoformat(normalized)
+    except ValueError:
+        raise ValueError(
+            f"get_time_slots {field}={value!r} is not a valid ISO date-time. "
+            "Use a full timestamp (e.g. '2026-09-28T10:00:00+00:00' or "
+            "'2026-09-28T10:00:00Z'); date-only values are rejected by the server."
+        ) from None
+    return normalized
 
 
 def _to_plain(value: Any) -> Any:
@@ -383,7 +409,12 @@ class SilpoClient:
         canonical plural form). Since release-1.111.1 timestamps with
         milliseconds are stripped upstream — this method also strips them
         client-side — and each slot carries ``serviceFee`` (the SelfPickup
-        "Сервісний збір" fee).
+        "Сервісний збір" fee). Since release-1.111.2 the server normalizes
+        ``start``/``end`` bounds (``Z``, ``+00:00`` and naive stamps are all
+        read as UTC) and restricts ``deliveryTypes`` to
+        :class:`~silpo_py_mcp.models.TimeSlotDeliveryType`; this method
+        validates the types, the ``limit`` bounds (1..100) and the timestamp
+        format up front instead of letting the server return ``-32602``/``400``.
         """
         types: list[str] = []
         if delivery_types:
@@ -392,13 +423,22 @@ class SilpoClient:
             types = [delivery_type]
         if not types:
             raise ValueError("get_time_slots requires delivery_type or delivery_types")
+        accepted = [member.value for member in TimeSlotDeliveryType]
+        invalid = [t for t in types if t not in accepted]
+        if invalid:
+            raise ValueError(
+                f"get_time_slots received delivery type(s) {invalid} that the server rejects "
+                f"(release-1.111.2 enum). Accepted values: {accepted}"
+            )
+        if limit is not None and not 1 <= limit <= 100:
+            raise ValueError(f"get_time_slots limit must be between 1 and 100, got {limit}")
         args: dict[str, Any] = {"branchId": branch_id, "deliveryTypes": types}
         if limit is not None:
             args["limit"] = limit
         if start is not None:
-            args["start"] = _strip_millis(start)
+            args["start"] = _normalize_slot_bound(start, field="start")
         if end is not None:
-            args["end"] = _strip_millis(end)
+            args["end"] = _normalize_slot_bound(end, field="end")
         payload = await self.call_tool(SilpoTool.GET_TIME_SLOTS, args)
         payload = self._unwrap_payload(payload, "slots")
         return self._validate(payload, TimeSlot, many=True)

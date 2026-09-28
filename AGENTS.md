@@ -121,7 +121,9 @@ Key design decisions:
   required sets; reconciled with server release-1.110.1 on Sep 11 2026;
   re-verified Sep 14 2026 — still 40 tools, no renames, no required-set
   changes; reconciled with server release-1.111.0/1.111.1 on Sep 25 2026 —
-  still 40 tools, no renames; plus the release-1.110.0 `silpo_get_product_details` output fix
+  still 40 tools, no renames; reconciled with server release-1.111.2 on
+  Sep 28 2026 — still 40 tools, no renames, no required-set changes; plus
+  the release-1.110.0 `silpo_get_product_details` output fix
   below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
@@ -177,6 +179,22 @@ Key design decisions:
   carries `serviceFee` (`SilpoCart.service_fee`/`CartTotals.service_fee`,
   mapped from top level or `calculation`; mock: 15.0 for SelfPickup, else
   0.0). `examples/real_smoke.py` probes each fix live.
+- **Release-1.111.2 fixes (client 0.7.0).** `silpo_get_time_slots` normalizes
+  its timeslot bounds: `Z`, `+00:00` and naive (offset-less) stamps are all
+  accepted and read as UTC, millisecond fractions are stripped, and a date-only
+  or unparseable bound answers a bare `400 Bad Request` — the client rejects it
+  first with `ValueError` (`_normalize_slot_bound`). Its `deliveryTypes`/
+  `deliveryType` enum is now the narrower 9-value `TimeSlotDeliveryType`
+  (`SelfPickup`, `DeliveryHome`, `DeliveryExpress`, `LongDelivery`,
+  `NovaPoshta`, `DeliveryExpressByPromise`, `WideAssortDelivery`, `B2B`,
+  `PreOrder`) — a strict subset of `DeliveryType`, which keeps all 16 values
+  used by the other tools; `Unknown`/`JustIn`/`JustInPost` now fail with
+  `-32602` while `B2B` is accepted again (the old 0.6.0 `B2B` quirk is gone).
+  `limit` is bounded to 1..100. `get_time_slots` validates all three
+  client-side; the mock enforces the same rules and now actually filters slots
+  by the requested window. `silpo_create_shopping_cart` requires `addressType`
+  (`house`/`flat`/`office`/`point`/`self-pickup`/`nova-poshta`) — the smoke
+  fills it and probes that write tool once (a second call is rate-limited).
 - **Release-1.110.0 `silpo_get_product_details` fix.** The server no longer
   returns stale catalog-wide `displayPrice`/`price` — pricing and
   availability are the requested branch's real offer, with an explicit

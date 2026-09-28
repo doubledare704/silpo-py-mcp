@@ -78,6 +78,26 @@ class DeliveryType(StrEnum):
     PRE_ORDER = "PreOrder"
 
 
+class TimeSlotDeliveryType(StrEnum):
+    """Delivery types accepted by ``silpo_get_time_slots`` (release-1.111.2).
+
+    The server narrowed the ``deliveryTypes``/``deliveryType`` enum for the
+    time-slots tool: it is a strict subset of :class:`DeliveryType`. Values
+    such as ``Unknown``/``JustIn``/``JustInPost`` now fail schema validation
+    with ``-32602``, while ``B2B`` is accepted again.
+    """
+
+    SELF_PICKUP = "SelfPickup"
+    DELIVERY_HOME = "DeliveryHome"
+    DELIVERY_EXPRESS = "DeliveryExpress"
+    LONG_DELIVERY = "LongDelivery"
+    NOVA_POSHTA = "NovaPoshta"
+    DELIVERY_EXPRESS_BY_PROMISE = "DeliveryExpressByPromise"
+    WIDE_ASSORT = "WideAssortDelivery"
+    B2B = "B2B"
+    PRE_ORDER = "PreOrder"
+
+
 class AvailableDeliveryType(SilpoModel):
     """A delivery option for a given coordinate."""
 

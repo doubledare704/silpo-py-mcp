@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 from silpo_py_mcp import SilpoMockServer
+from silpo_py_mcp.models import DeliveryType, TimeSlotDeliveryType
 from silpo_py_mcp.tools import SilpoTool
 
 EXPECTED_TOOLS: list[str] = [t.value for t in SilpoTool]
@@ -163,7 +166,90 @@ async def test_mock_time_slots_accepts_millisecond_timestamps(mock_server: Silpo
                 "end": "2026-09-02T12:00:00.000Z",
             },
         )
-        assert len(result.data) == 3
+        assert [s["start"] for s in result.data] == ["2026-09-02T10:00:00+00:00"]
+
+
+async def test_mock_time_slots_normalizes_bounds(mock_server: SilpoMockServer) -> None:
+    """release-1.111.2: Z, +00:00 and naive bounds are all read as UTC."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        zulu = await client.call_tool(
+            "silpo_get_time_slots",
+            {
+                "branchId": "bran-1",
+                "deliveryTypes": ["SelfPickup"],
+                "start": "2026-09-02T08:00:00Z",
+                "end": "2026-09-02T09:00:00Z",
+            },
+        )
+        naive = await client.call_tool(
+            "silpo_get_time_slots",
+            {
+                "branchId": "bran-1",
+                "deliveryTypes": ["SelfPickup"],
+                "start": "2026-09-02T08:00:00",
+                "end": "2026-09-02T09:00:00",
+            },
+        )
+        offset = await client.call_tool(
+            "silpo_get_time_slots",
+            {
+                "branchId": "bran-1",
+                "deliveryTypes": ["SelfPickup"],
+                "start": "2026-09-02T08:00:00+00:00",
+                "end": "2026-09-02T09:00:00+00:00",
+            },
+        )
+        assert (
+            [s["id"] for s in zulu.data]
+            == [s["id"] for s in naive.data]
+            == [s["id"] for s in offset.data]
+            == ["slot-0"]
+        )
+
+
+async def test_mock_time_slots_rejects_date_only_bounds(mock_server: SilpoMockServer) -> None:
+    """release-1.111.2: date-only / unparseable bounds are rejected (live 400)."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        for bad in ("2026-09-02", "garbage"):
+            with pytest.raises(ToolError, match="400 Bad Request"):
+                await client.call_tool(
+                    "silpo_get_time_slots",
+                    {"branchId": "bran-1", "deliveryTypes": ["SelfPickup"], "start": bad},
+                )
+
+
+async def test_mock_time_slots_enforces_delivery_type_enum(mock_server: SilpoMockServer) -> None:
+    """release-1.111.2: deliveryTypes restricted to the live 9-value enum."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        for accepted in TimeSlotDeliveryType:
+            result = await client.call_tool(
+                "silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": [accepted.value]}
+            )
+            assert result.data[0]["deliveryType"] == accepted.value
+
+        rejected = {member.value for member in DeliveryType} - {member.value for member in TimeSlotDeliveryType}
+        assert rejected  # the enum is a strict subset
+        for value in sorted(rejected):
+            with pytest.raises(ToolError, match="Invalid option"):
+                await client.call_tool("silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": [value]})
+
+
+async def test_mock_time_slots_enforces_limit_bounds(mock_server: SilpoMockServer) -> None:
+    """release-1.111.2: limit is bounded to 1..100 by the live schema."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        limited = await client.call_tool(
+            "silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": ["SelfPickup"], "limit": 2}
+        )
+        assert len(limited.data) == 2
+        for bad in (0, 101):
+            with pytest.raises(ToolError, match="limit must be between 1 and 100"):
+                await client.call_tool(
+                    "silpo_get_time_slots", {"branchId": "bran-1", "deliveryTypes": ["SelfPickup"], "limit": bad}
+                )
 
 
 async def test_mock_find_address_flags_unmatched_house(mock_server: SilpoMockServer) -> None:

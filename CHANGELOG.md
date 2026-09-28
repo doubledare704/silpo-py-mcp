@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.7.0 — 2026-09-28
+
+Reconciled with server release-1.111.2 (1 tool affected, still 40 tools, no
+renames, no new required arguments). The release adds timeslot normalization
+to `silpo_get_time_slots` and narrows its `deliveryTypes` enum; both are
+mirrored by the typed method, the mock and `examples/real_smoke.py`.
+
+### Added
+
+- `TimeSlotDeliveryType` (9 values) — the live `deliveryTypes` /
+  `deliveryType` enum of `silpo_get_time_slots`
+  (`SelfPickup`, `DeliveryHome`, `DeliveryExpress`, `LongDelivery`,
+  `NovaPoshta`, `DeliveryExpressByPromise`, `WideAssortDelivery`, `B2B`,
+  `PreOrder`). It is a strict subset of `DeliveryType`, so it is exposed as a
+  separate enum instead of shrinking the wider one.
+- `get_time_slots` now normalizes timeslot bounds the way release-1.111.2
+  does: `Z` suffixes, explicit `+00:00` offsets, millisecond fractions and
+  naive (offset-less) stamps are all accepted and read as UTC, and returned
+  slots come back with a normalized `+00:00` offset.
+
+### Changed
+
+- `get_time_slots` validates arguments before the request, mirroring the
+  narrowed live schema instead of surfacing a raw `-32602`/HTTP 400:
+  delivery types outside `TimeSlotDeliveryType` and a `limit` outside 1..100
+  raise `ValueError` with the accepted values, and a `start`/`end` that is not
+  a full ISO date-time (date-only, unparseable) raises `ValueError` before the
+  server answers `400 Bad Request`.
+- Mock `silpo_get_time_slots` mirrors release-1.111.2: it validates the
+  delivery-type enum and `limit` bounds, normalizes `start`/`end`
+  (`Z`/`+00:00`/naive read as UTC, date-only rejected), and **actually filters
+  slots by the requested window** instead of ignoring the range.
+- Mock time-slot timestamps are emitted as `...+00:00` (was `...Z`, and the
+  10:00 slot previously rendered the invalid `T010:00:00Z`).
+- `examples/real_smoke.py` probes the release-1.111.2 contract live (naive
+  bounds accepted, date-only rejected, `Unknown`/`JustIn` outside the enum),
+  fills the required `addressType` for the `silpo_create_shopping_cart`
+  coverage probe, and probes that write tool once instead of twice (the second
+  call was rate-limited).
+
+### Fixed
+
+- The `-32602` quirk for `deliveryTypes: ["B2B"]` on
+  `silpo_get_time_slots` is gone: `B2B` is part of the enum again and returns
+  an empty slot list. `README.md` no longer lists it as a server quirk.
+- The no-filter `silpo_get_products` negative probe no longer counts as a
+  battery failure — an expected rejection is now reported as a pass.
+
 ## 0.6.0 — 2026-09-25
 
 Reconciled with server release-1.111.0 and release-1.111.1 (5 tools
