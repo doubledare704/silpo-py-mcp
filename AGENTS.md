@@ -132,8 +132,11 @@ Key design decisions:
   2026 — still 40 tools, no renames, no required-set changes;
   `silpo_get_promotions` returns `[]` for an unknown branch (was 500),
   `silpo_get_time_slots` has a more lenient date normalizer plus a `total`
-  in the response, and `silpo_add_or_update_cart_products` has a clarified
-  description (all below).
+  in the response, and   `silpo_add_or_update_cart_products` has a clarified
+  description (all below); reconciled with server release-1.111.5 on Sep 30
+  2026 — still 40 tools, no renames, no required-set changes;
+  `silpo_get_coupon_details` gained `successorThreshold` marking gateway
+  coupons (all below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
@@ -287,6 +290,17 @@ Key design decisions:
     kilograms for weighted products, `get_cart_by_id` afterwards. Client and
     mock docstrings carry it; `examples/real_smoke.py` logs the live tool
     description and probes the other three fixes.
+- **Release-1.111.5 changes (client 0.8.2).**
+  - **`silpo_get_coupon_details` gateway coupons:** the live `coupon` object
+    gained `successorThreshold` (`{promoId, amount, description, rewardText}`,
+    `null` for ordinary coupons, now in the required set). A non-null value
+    marks a gateway coupon unlocking a *different* promo once the threshold is
+    spent (live Yezzz!: spend ₴2000 → `безкоштовний зв'язок`); `progress`
+    tracks toward that threshold. Modelled as `CouponSuccessorThreshold` on
+    `CouponDetail.successor_threshold` with the `is_gateway` helper; the mock
+    returns the gateway shape for fixture id `600971427` and
+    `successorThreshold: None` otherwise; `examples/real_smoke.py` logs the
+    live field for every probed coupon.
 - **Release-1.110.0 `silpo_get_product_details` fix.** The server no longer
   returns stale catalog-wide `displayPrice`/`price` — pricing and
   availability are the requested branch's real offer, with an explicit

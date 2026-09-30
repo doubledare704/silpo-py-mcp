@@ -1149,6 +1149,12 @@ class SilpoClient:
 
         Check ``can_be_applied_to_order`` for eligibility — it requires both
         the user toggle (``active``) and the lifecycle ``state`` to allow use.
+
+        Release-1.111.5: a non-null ``successor_threshold`` marks a gateway
+        coupon that unlocks a different promo once the threshold is spent —
+        present ``successor_threshold.description`` (``is_gateway``) instead
+        of the coupon's own reward, and read ``progress`` as tracking toward
+        that threshold.
         """
         payload = await self.call_tool(SilpoTool.GET_COUPON_DETAILS, {"businessCouponId": business_coupon_id})
         payload = self._unwrap_payload(payload, "coupon")

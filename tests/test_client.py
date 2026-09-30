@@ -357,6 +357,15 @@ async def test_orders_profile_loyalty_groups(client: SilpoClient) -> None:
     assert coupon.can_be_applied_to_order is True
     assert coupon.business_coupon_id == 520703581
     assert coupon.state == "Активний"
+    assert coupon.successor_threshold is None
+    assert coupon.is_gateway is False
+
+    gateway = await client.get_coupon_details(600971427)
+    assert gateway.is_gateway is True
+    assert gateway.successor_threshold is not None
+    assert gateway.successor_threshold.promo_id == 257655
+    assert gateway.successor_threshold.amount == 2000.0
+    assert gateway.successor_threshold.description == "безкоштовний зв'язок"
 
     promos = await client.get_promos()
     assert promos[0].promo_id

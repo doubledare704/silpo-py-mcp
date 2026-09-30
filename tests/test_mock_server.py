@@ -311,6 +311,18 @@ async def test_mock_coupon_details_eligibility_flag(mock_server: SilpoMockServer
         result = await client.call_tool("silpo_get_coupon_details", {"businessCouponId": 520703581})
         assert result.data["canBeAppliedToOrder"] is True
         assert result.data["state"] == "Активний"
+        assert result.data["successorThreshold"] is None
+
+
+async def test_mock_coupon_details_gateway_shape(mock_server: SilpoMockServer) -> None:
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool("silpo_get_coupon_details", {"businessCouponId": 600971427})
+        threshold = result.data["successorThreshold"]
+        assert threshold["promoId"] == 257655
+        assert threshold["amount"] == 2000.0
+        assert threshold["description"] == "безкоштовний зв'язок"
+        assert result.data["progress"]["target"] == 2000.0
 
 
 async def test_mock_certificates_accept_barcode_objects(mock_server: SilpoMockServer) -> None:

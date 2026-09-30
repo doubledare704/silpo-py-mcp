@@ -1010,6 +1010,9 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
 
     # -- loyalty (7) -------------------------------------------------------
     await check("silpo_get_loyalty_info", {}, retries=1)
+    coupon_tool = by_name.get("silpo_get_coupon_details")
+    if coupon_tool is not None:
+        print(f"  · get-coupon-details description: {(coupon_tool.description or '')[:200]!r}")
     coupons = await check("silpo_get_my_coupons", {}, retries=1)
     coupon_list = []
     if isinstance(coupons, list):
@@ -1023,9 +1026,37 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         except Exception:
             bid = None
         if bid is not None:
-            await check("silpo_get_coupon_details", {"businessCouponId": bid}, retries=1)
+            details = await check("silpo_get_coupon_details", {"businessCouponId": bid}, retries=1)
         else:
-            await check("silpo_get_coupon_details", {"businessCouponId": 520703581}, retries=1)
+            details = await check("silpo_get_coupon_details", {"businessCouponId": 520703581}, retries=1)
+        # release-1.111.5: gateway coupons carry successorThreshold
+        coupon_obj = (details or {}).get("coupon", details) if isinstance(details, dict) else {}
+        if isinstance(coupon_obj, dict) and "successorThreshold" in coupon_obj:
+            print(
+                f"  · successorThreshold={_short(coupon_obj.get('successorThreshold'))} (release-1.111.5 field present)"
+            )
+        else:
+            print("  · note: live silpo_get_coupon_details has no successorThreshold (pre-1.111.5?)")
+        # probe every listed coupon so a gateway one (e.g. Yezzz!) is logged when present
+        seen_successor = isinstance(coupon_obj, dict) and coupon_obj.get("successorThreshold") is not None
+        for entry in coupon_list[1:4]:
+            other_cid = entry.get("businessCouponId") or entry.get("couponId") or entry.get("id")
+            try:
+                other_bid = int(float(other_cid)) if other_cid is not None else None
+            except Exception:
+                other_bid = None
+            if other_bid is None or other_bid == bid:
+                continue
+            other_details = await check("silpo_get_coupon_details", {"businessCouponId": other_bid}, retries=1)
+            other_coupon = (other_details or {}).get("coupon", other_details) if isinstance(other_details, dict) else {}
+            if isinstance(other_coupon, dict) and other_coupon.get("successorThreshold") is not None:
+                print(
+                    f"  · gateway coupon {other_bid}: "
+                    f"successorThreshold={_short(other_coupon.get('successorThreshold'))}"
+                )
+                seen_successor = True
+        if not seen_successor:
+            print("  · note: no gateway coupon among the probed coupons")
     else:
         await check("silpo_get_coupon_details", {"businessCouponId": 520703581}, retries=1)
 

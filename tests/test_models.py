@@ -209,6 +209,45 @@ def test_coupon_detail_live_shape() -> None:
     )
     assert coupon.can_be_applied_to_order is True
     assert coupon.business_coupon_id == 520703581
+    assert coupon.successor_threshold is None
+    assert coupon.is_gateway is False
+
+
+def test_coupon_detail_gateway_shape() -> None:
+    coupon = CouponDetail.model_validate(
+        {
+            "id": 600971427,
+            "active": True,
+            "state": "Активний",
+            "canBeAppliedToOrder": True,
+            "useWay": "Електронний",
+            "beginDate": "2026-09-22",
+            "endDate": "2026-10-22",
+            "endDateTime": "2026-10-22T23:59:59",
+            "usedCount": 0,
+            "description": "Безкоштовний мобільний зв’язок Yezzz!",
+            "limitText": "Акція діє на всі товари Сільпо",
+            "warningText": "За придбання товарів в «Сільпо» на суму 2000 грн",
+            "rewardText": "",
+            "rewardValue": None,
+            "image": None,
+            "promoId": 257654,
+            "rewardUnit": None,
+            "rewardSign": None,
+            "rewardLimit": None,
+            "progress": {"current": 0.0, "target": 2000.0, "percent": 0.0, "unit": "₴"},
+            "successorThreshold": {
+                "promoId": 257655,
+                "amount": 2000.0,
+                "description": "безкоштовний зв'язок",
+                "rewardText": "-",
+            },
+        }
+    )
+    assert coupon.is_gateway is True
+    assert coupon.successor_threshold is not None
+    assert coupon.successor_threshold.promo_id == 257655
+    assert coupon.successor_threshold.amount == 2000.0
 
 
 def test_cart_defaults() -> None:

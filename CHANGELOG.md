@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.2 — 2026-09-30
+
+Reconciled with server release-1.111.5 (1 tool affected, still 40 tools, no
+renames, no required-set changes). The release adds gateway-coupon support to
+`silpo_get_coupon_details`; the typed method, the mock and
+`examples/real_smoke.py` mirror it.
+
+### Added
+
+- `CouponSuccessorThreshold` (`successorThreshold`: `promoId`/`amount`/
+  `description`/`rewardText`) — a non-null value marks a gateway coupon that
+  unlocks a *different* promo once the spend threshold is met (e.g. Yezzz!:
+  spend ₴2000 → promo `безкоштовний зв'язок`). Exposed as
+  `CouponDetail.successor_threshold` with the `CouponDetail.is_gateway`
+  helper; `progress` (when non-null) tracks toward that threshold, not a
+  reward on the coupon itself.
+- Mock `silpo_get_coupon_details` returns the live gateway shape for the
+  Yezzz! fixture id (`600971427`, with `progress` toward ₴2000 and the
+  `successorThreshold` block) and `successorThreshold: None` for any other id.
+- `examples/real_smoke.py` logs `successorThreshold` for every probed coupon
+  so a live gateway coupon is surfaced when present.
+
 ## 0.8.1 — 2026-09-30
 
 Reconciled with server release-1.111.4 (4 notes, still 40 tools, no renames,

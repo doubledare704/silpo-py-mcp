@@ -100,7 +100,9 @@ asyncio.run(main())
 > changes, with the cart/payment/category changes below; reconciled with
 > server release-1.111.4 on Sep 30 2026 — still 40 tools, no renames, no
 > required-set changes, with the promotions/time-slots/cart-description
-> fixes below). Context
+> fixes below; reconciled with server release-1.111.5 on Sep 30 2026 —
+> still 40 tools, no renames, no required-set changes, with the gateway
+> coupon below). Context
 > arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them — since 1.110.1 this includes
@@ -147,7 +149,11 @@ asyncio.run(main())
 > returned products). Coupon
 > eligibility comes from
 > `canBeAppliedToOrder` on `silpo_get_coupon_details` — never infer it from
-> `active`/`state` alone. The mock cart tools
+> `active`/`state` alone; since release-1.111.5 a non-null
+> `successorThreshold` marks a gateway coupon (`CouponDetail.is_gateway`) that
+> unlocks a different promo once the threshold is spent — present
+> `successor_threshold.description` and read `progress` as tracking toward
+> that threshold. The mock cart tools
 > (`silpo_get_shopping_cart_by_id`, `silpo_clear_shopping_cart`, ...) accept
 > **only** `shoppingCartId` — the legacy `cartId` alias was removed in 0.3.1
 > to match the live schema. `call_tool` always passes arguments through
@@ -173,6 +179,12 @@ asyncio.run(main())
 | `get-time-slots` date normalizer | More lenient: surrounding whitespace, lowercase `z`, comma fractions, `+HHMM`/`+HH` offsets and a space separator are all accepted and read as UTC (`silpo_py_mcp.slot_time`, shared by the client and the mock). Date-only/unparseable values still fail fast (`ValueError` client-side, `400` on the wire). |
 | `get-time-slots` total response | The live response now carries `total` alongside `slots`; `get_time_slots` unwraps `slots`/`timeSlots`/`deliveryTimeSlots` and ignores the count (it always equals `len(slots)`). |
 | `add-or-update-cart-products` description | Clarified tool description (full line shape, replace-vs-add, kilograms for weighted products, `get_cart_by_id` afterwards) — behavior unchanged; client and mock docstrings carry it. |
+
+### release-1.111.5 (client 0.8.2)
+
+| Change | Detail |
+|---|---|
+| `get-coupon-details` gateway coupons | The response now carries `successorThreshold` (`promoId`/`amount`/`description`/`rewardText`, `null` for ordinary coupons). A non-null value means the coupon unlocks a *different* promo once the threshold is spent (e.g. Yezzz!: spend ₴2000 → `безкоштовний зв'язок`) — exposed as `CouponDetail.successor_threshold` with the `is_gateway` helper; `progress` tracks toward that threshold. The mock returns the live gateway shape for fixture id `600971427`. |
 
 ### Smoke test against the real server
 

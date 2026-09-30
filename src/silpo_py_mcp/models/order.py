@@ -228,6 +228,20 @@ class CouponProgress(SilpoModel):
     unit: str | None = None
 
 
+class CouponSuccessorThreshold(SilpoModel):
+    """Gateway target unlocked by a coupon (release-1.111.5 ``successorThreshold``).
+
+    A non-null ``successor_threshold`` on ``CouponDetail`` means the coupon is a
+    gateway: spending ``amount`` unlocks a *different* promo (``promo_id``),
+    described by ``description``, rather than rewarding the coupon itself.
+    """
+
+    promo_id: float | int = Field(alias="promoId")
+    amount: float | None = None
+    description: str | None = None
+    reward_text: str | None = Field(default=None, alias="rewardText")
+
+
 class CouponDetail(SilpoModel):
     """Full coupon information from ``silpo_get_coupon_details`` (live shape).
 
@@ -235,6 +249,11 @@ class CouponDetail(SilpoModel):
     when the user toggle (``active``) is on and the lifecycle ``state`` is
     ``"Активний"``. Legacy ``conditions``/``productIds``/``barcode`` fields
     are kept for backward compatibility with older fixtures.
+
+    Release-1.111.5: a non-null ``successor_threshold`` marks a gateway coupon
+    that unlocks a different promo once the threshold is spent — present
+    ``successor_threshold.description`` to the user (``promo_id`` alone is not
+    meaningful) and read ``progress`` as tracking toward that threshold.
     """
 
     id: float | int | str | None = None
@@ -260,9 +279,15 @@ class CouponDetail(SilpoModel):
     reward_sign: str | None = Field(default=None, alias="rewardSign")
     reward_limit: float | None = Field(default=None, alias="rewardLimit")
     progress: CouponProgress | None = None
+    successor_threshold: CouponSuccessorThreshold | None = Field(default=None, alias="successorThreshold")
     conditions: list[str] = Field(default_factory=list)
     product_ids: list[str] = Field(default_factory=list, alias="productIds")
     barcode: str | None = None
+
+    @property
+    def is_gateway(self) -> bool:
+        """Whether this coupon is a gateway unlocking a different promo."""
+        return self.successor_threshold is not None
 
     @model_validator(mode="after")
     def _fill_business_id(self) -> CouponDetail:

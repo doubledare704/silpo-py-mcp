@@ -1452,8 +1452,46 @@ class SilpoMockServer:
 
         @self._fastmcp.tool
         def silpo_get_coupon_details(businessCouponId: int | float | str) -> dict[str, Any]:
-            """Full coupon info: eligibility, conditions, reward, progress."""
-            _ = businessCouponId  # mock returns the fixture coupon for any id
+            """Full coupon info: eligibility, conditions, reward, progress.
+
+            Release-1.111.5: gateway coupons carry ``successorThreshold``.
+            The ``Yezzz!`` fixture id (600971427) returns the live gateway
+            shape; any other id returns the ordinary coupon.
+            """
+            try:
+                coupon_key = int(float(str(businessCouponId)))
+            except (TypeError, ValueError):
+                coupon_key = None
+            if coupon_key == 600971427:
+                return {
+                    "id": 600971427,
+                    "active": True,
+                    "state": "Активний",
+                    "canBeAppliedToOrder": True,
+                    "useWay": "Електронний",
+                    "beginDate": "2026-09-22",
+                    "endDate": "2026-10-22",
+                    "endDateTime": "2026-10-22T23:59:59",
+                    "usedCount": 0,
+                    "description": "Безкоштовний мобільний зв’язок Yezzz!",
+                    "limitText": "Акція діє на всі товари Сільпо",
+                    "warningText": "За придбання товарів в «Сільпо» на суму 2000 грн",
+                    "rewardText": "",
+                    "rewardValue": None,
+                    "image": "https://images.silpo.ua/mock/coupon.png",
+                    "promoId": 257654,
+                    "rewardUnit": None,
+                    "rewardSign": None,
+                    "rewardLimit": None,
+                    "progress": {"current": 0.0, "target": 2000.0, "percent": 0.0, "unit": "₴"},
+                    "successorThreshold": {
+                        "promoId": 257655,
+                        "amount": 2000.0,
+                        "description": "безкоштовний зв'язок",
+                        "rewardText": "-",
+                    },
+                }
+            _ = businessCouponId  # mock returns the fixture coupon for any other id
             return {
                 "id": 520703581,
                 "active": True,
@@ -1475,6 +1513,7 @@ class SilpoMockServer:
                 "rewardSign": "-",
                 "rewardLimit": 50.0,
                 "progress": None,
+                "successorThreshold": None,
             }
 
         @self._fastmcp.tool
