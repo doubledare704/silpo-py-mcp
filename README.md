@@ -97,7 +97,10 @@ asyncio.run(main())
 > still 40 tools, no renames; reconciled with server release-1.111.2 on
 > Sep 28 2026 — still 40 tools, no renames; reconciled with server
 > release-1.111.3 on Sep 28 2026 — still 40 tools, no renames, no required-set
-> changes, with the cart/payment/category changes below). Context
+> changes, with the cart/payment/category changes below; reconciled with
+> server release-1.111.4 on Sep 30 2026 — still 40 tools, no renames, no
+> required-set changes, with the promotions/time-slots/cart-description
+> fixes below). Context
 > arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them — since 1.110.1 this includes
@@ -122,7 +125,13 @@ asyncio.run(main())
 > rejected) and restricts `deliveryTypes` to the 9-value
 > `TimeSlotDeliveryType` enum — `get_time_slots` validates the types, the
 > `limit` bounds (1..100) and the timestamp format client-side instead of
-> letting the server answer `-32602`/400; `find_address` surfaces `warning`/`houseNumberMatched` for
+> letting the server answer `-32602`/400; release-1.111.4 makes the date
+> normalizer more lenient (whitespace, lowercase `z`, comma fractions,
+> `+HHMM`/`+HH` offsets and a space separator are read as UTC) and adds a
+> `total` to the slots response (`{success, summary, slots, total}` — the
+> client returns the list and ignores the count); `get_promotions` for an
+> unknown branch returns `[]` instead of the pre-1.111.4 `500`;
+> `find_address` surfaces `warning`/`houseNumberMatched` for
 > unmatched house numbers (release-1.111.1 — check before relying on
 > coordinates); `get_available_delivery_types` coordinates are only validated
 > for home-delivery types (`SelfPickup`/`NovaPoshta` always returned);
@@ -155,6 +164,15 @@ asyncio.run(main())
 | Amount to show the guest | `calculation.total` is the total *before* discounts; `cart.total_to_pay` (`calculation.totalAfterDiscounts`) is what the guest actually pays. Always present the latter. |
 | `update_shopping_cart` schema | `address` must carry an `addressType` (`CartAddressType`: `house`/`flat`/`office`/`point`/`self-pickup`/`nova-poshta`) and each `shipments` entry a `companyId` + `branchId` pair; `deliveryType` is narrowed to the 8-value `UpdateCartDeliveryType`. `update_shopping_cart` validates all of this client-side and raises `ValueError` naming the offending argument. Copy both objects from the cart via `cart.update_payloads` (`address`/`shipments`/`timeslot`/`missing_fields`) instead of building them. `clear_bonus=True` sends the explicit `bonusRequested: null` that removes bonus payment. |
 | `get_time_slots` / product docs clarified | Slot times are UTC; `available` is authoritative (a type can show pricing while every slot is unavailable — filter on `TimeSlot.is_bookable`); `minOrderCost` is reported only by this tool; `serviceFee` is a preview that `calculation.serviceFee.total` supersedes once a cart exists. For `weighted=True` products `step` and cart `quantity` are **always kilograms**, whatever `display_ratio` shows. |
+
+### release-1.111.4 (client 0.8.1)
+
+| Change | Detail |
+|---|---|
+| `get-promotions` 500 fix | An unknown `branchId` returns `[]` instead of the previous `500` error — the mock mirrors it and `get_promotions` documents the empty-means-no-promotions contract. |
+| `get-time-slots` date normalizer | More lenient: surrounding whitespace, lowercase `z`, comma fractions, `+HHMM`/`+HH` offsets and a space separator are all accepted and read as UTC (`silpo_py_mcp.slot_time`, shared by the client and the mock). Date-only/unparseable values still fail fast (`ValueError` client-side, `400` on the wire). |
+| `get-time-slots` total response | The live response now carries `total` alongside `slots`; `get_time_slots` unwraps `slots`/`timeSlots`/`deliveryTimeSlots` and ignores the count (it always equals `len(slots)`). |
+| `add-or-update-cart-products` description | Clarified tool description (full line shape, replace-vs-add, kilograms for weighted products, `get_cart_by_id` afterwards) — behavior unchanged; client and mock docstrings carry it. |
 
 ### Smoke test against the real server
 

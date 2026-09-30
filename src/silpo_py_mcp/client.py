@@ -16,9 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-import re
 from collections.abc import Mapping
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
 from fastmcp import Client as FastMCPClient
@@ -78,6 +76,8 @@ from silpo_py_mcp.models import (
     TimeSlotDeliveryType,
     UpdateCartDeliveryType,
 )
+from silpo_py_mcp.slot_time import normalize_slot_bound as _normalize_slot_bound
+from silpo_py_mcp.slot_time import strip_millis as _strip_millis
 from silpo_py_mcp.tools import SilpoTool
 
 logger = logging.getLogger(__name__)
@@ -85,42 +85,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=SilpoModel)
 
 _JSONRPC_METHOD_NOT_FOUND = -32601
-
-_MILLIS_RE = re.compile(r"\.\d+(?=(Z|[+-]\d{2}:?\d{2}|$))")
-
-
-def _strip_millis(value: str) -> str:
-    """Strip milliseconds from an ISO timestamp (release-1.111.1).
-
-    The server rejected ``Date#toISOString()``-style stamps (``...:00.123Z``)
-    before 1.111.1; it now strips them upstream, but normalizing client-side
-    keeps the client compatible with older servers and avoids surprises.
-    """
-    return _MILLIS_RE.sub("", value)
-
-
-def _normalize_slot_bound(value: str, *, field: str) -> str:
-    """Validate and normalize a ``get_time_slots`` ``start``/``end`` bound.
-
-    Since release-1.111.2 the server normalizes timeslot bounds itself: ``Z``
-    suffixes, explicit ``+00:00`` offsets and naive local stamps are all
-    accepted and interpreted as UTC, while a date-only value or anything
-    unparseable is rejected upstream with a bare ``400``. Validating here
-    turns that into an actionable error and rejects date-only input before
-    the request (the server has no time component to normalize).
-    """
-    normalized = _strip_millis(value)
-    try:
-        if "T" not in normalized:
-            raise ValueError
-        datetime.fromisoformat(normalized)
-    except ValueError:
-        raise ValueError(
-            f"get_time_slots {field}={value!r} is not a valid ISO date-time. "
-            "Use a full timestamp (e.g. '2026-09-28T10:00:00+00:00' or "
-            "'2026-09-28T10:00:00Z'); date-only values are rejected by the server."
-        ) from None
-    return normalized
 
 
 def _check_update_delivery_type(value: Any) -> str | None:
@@ -436,6 +400,13 @@ class SilpoClient:
         :class:`~silpo_py_mcp.models.TimeSlotDeliveryType`; this method
         validates the types, the ``limit`` bounds (1..100) and the timestamp
         format up front instead of letting the server return ``-32602``/``400``.
+        Release-1.111.4 made the date normalizer more lenient (surrounding
+        whitespace, lowercase ``z``, comma fractions, ``+HHMM``/``+HH``
+        offsets and a space separator are accepted and read as UTC).
+
+        Since release-1.111.4 the response carries a ``total`` alongside
+        ``slots`` (``{success, summary, slots, total}``); this method returns
+        the slot list and ignores the count (it always equals ``len(slots)``).
 
         Release-1.111.3 clarified the semantics, so when reading the result:
 
@@ -474,7 +445,7 @@ class SilpoClient:
         if end is not None:
             args["end"] = _normalize_slot_bound(end, field="end")
         payload = await self.call_tool(SilpoTool.GET_TIME_SLOTS, args)
-        payload = self._unwrap_payload(payload, "slots")
+        payload = self._unwrap_payload(payload, "slots", "timeSlots", "deliveryTimeSlots")
         return self._validate(payload, TimeSlot, many=True)
 
     async def find_nova_poshta_settlements(
@@ -755,7 +726,12 @@ class SilpoClient:
         timeslot_start: str,
         timeslot_end: str,
     ) -> list[Promotion]:
-        """Active promotions and discounts for a branch."""
+        """Active promotions and discounts for a branch.
+
+        Since server release-1.111.4 an unknown ``branch_id`` returns an
+        empty list instead of the previous ``500`` error — an empty result
+        means "no promotions here", not a failure.
+        """
         payload = await self.call_tool(
             SilpoTool.GET_PROMOTIONS,
             {
@@ -946,14 +922,20 @@ class SilpoClient:
     ) -> CartUpdateResult:
         """Add products or update quantities in the cart.
 
-        ``products`` entries need ``productId`` + ``companyId`` + ``branchId``
-        (as returned by product search) plus a ``quantity``. Dict entries are
-        sent verbatim; ``CartLineInput`` entries are serialized with aliases.
+        ``products`` is the full line description the server prices and
+        reserves: each entry needs ``productId`` + ``companyId`` + ``branchId``
+        (copy all three from product search) plus a ``quantity``. Dict entries
+        are sent verbatim; ``CartLineInput`` entries are serialized with
+        aliases.
 
-        Quantity semantics (live): if ``addQuantity`` is omitted or false the
-        quantity you send becomes the new total (replace); set
-        ``addQuantity: true`` to increase the existing quantity by the given
-        amount. ``comment`` carries per-line special instructions.
+        Quantity semantics (live, clarified in release-1.111.4): if
+        ``addQuantity`` is omitted or false the quantity you send becomes the
+        new line total (replace); set ``addQuantity: true`` to increase the
+        existing quantity by the given amount. For weighted products
+        (``weighted: true``) ``quantity`` and ``step`` are always kilograms,
+        whatever ``displayRatio`` shows. ``comment`` carries per-line special
+        instructions. The server does not echo the full cart — call
+        ``get_cart_by_id`` afterwards to verify the result.
         """
         lines: list[dict[str, Any]] = [
             entry.model_dump(by_alias=True, exclude_none=True) if isinstance(entry, CartLineInput) else entry

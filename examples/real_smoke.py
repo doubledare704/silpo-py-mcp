@@ -425,6 +425,27 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         )
         if naive_payload is not None:
             print("  · naive (offset-less) bounds accepted and normalized (release-1.111.2)")
+        # release-1.111.4: the date normalizer is more lenient (whitespace,
+        # lowercase z, +HHMM/+HH offsets, space separator all read as UTC)
+        lenient_payload = await check(
+            "silpo_get_time_slots",
+            {
+                "branchId": state["branchId"],
+                "deliveryTypes": [state["deliveryType"]],
+                "start": " 2026-09-02T10:00:00,123z ",
+                "end": "2026-09-02 12:00:00+0000",
+            },
+            retries=1,
+        )
+        if lenient_payload is not None:
+            print("  · lenient bounds accepted and normalized (release-1.111.4)")
+        if isinstance(lenient_payload or naive_payload or millis_payload, dict):
+            envelope = lenient_payload or naive_payload or millis_payload
+            assert isinstance(envelope, dict)
+            if "total" in envelope:
+                print(f"  · total={envelope.get('total')} in get_time_slots response (release-1.111.4)")
+            else:
+                print("  · note: live silpo_get_time_slots has no total (pre-1.111.4?)")
         await expect_rejected(
             "silpo_get_time_slots",
             {"branchId": state["branchId"], "deliveryTypes": [state["deliveryType"]], "start": "2026-09-02"},
@@ -568,6 +589,25 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         },
         retries=1,
     )
+    # release-1.111.4: unknown branches return [] instead of a 500 error
+    unknown_promos = await check(
+        "silpo_get_promotions",
+        {
+            "branchId": "bran-does-not-exist",
+            "deliveryType": state["deliveryType"],
+            "timeslotStart": state["timeslotStart"],
+            "timeslotEnd": state["timeslotEnd"],
+        },
+        retries=1,
+    )
+    if isinstance(unknown_promos, dict):
+        promos = unknown_promos.get("promotions", unknown_promos)
+        print(f"  · unknown-branch promotions: {_short(promos)} (release-1.111.4 expects [])")
+    elif isinstance(unknown_promos, list):
+        print(f"  · unknown-branch promotions: {len(unknown_promos)} items (release-1.111.4 expects [])")
+    cart_tool = by_name.get("silpo_add_or_update_cart_products")
+    if cart_tool is not None:
+        print(f"  · add-or-update-cart-products description: {(cart_tool.description or '')[:160]!r}")
     await check(
         "silpo_get_popular_categories",
         {"branchId": state["branchId"], "deliveryType": state["deliveryType"]},

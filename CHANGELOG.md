@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.8.1 — 2026-09-30
+
+Reconciled with server release-1.111.4 (4 notes, still 40 tools, no renames,
+no required-set changes). All typed methods and the mock mirror the new
+server behavior; `examples/real_smoke.py` probes each fix live.
+
+### Added
+
+- `silpo_py_mcp.slot_time` — single-responsibility home for the
+  `get_time_slots` date normalizer, shared by the client pre-validation and
+  the mock window filtering (`strip_millis` / `normalize_slot_bound` /
+  `parse_slot_bound`). `SilpoClient._strip_millis` /
+  `SilpoClient._normalize_slot_bound` stay as backwards-compatible aliases.
+- Lenient bound handling (release-1.111.4): surrounding whitespace, lowercase
+  `z`, comma fractions, `+HHMM`/`+HH` offsets and a space separator are all
+  accepted and read as UTC; date-only/unparseable values still raise
+  `ValueError` before the request (mock: `400 Bad Request`).
+
+### Changed
+
+- `get_time_slots` unwraps the release-1.111.4 total response
+  (`{success, summary, slots, total}` plus the live `timeSlots` /
+  `deliveryTimeSlots` aliases) and returns the slot list; `total` always
+  equals `len(slots)` and is ignored.
+- `add_or_update_cart_products` docstring carries the clarified
+  release-1.111.4 description (full line shape, replace-vs-add, kilograms
+  for weighted products, `get_cart_by_id` afterwards); behavior is unchanged.
+- `examples/real_smoke.py` probes the release-1.111.4 contract live
+  (lenient bounds, `total` in the slots envelope, unknown-branch promotions
+  returning `[]`, cart-products tool description).
+
+### Fixed
+
+- `silpo_get_promotions` no longer 500s for an unknown branch: the server
+  returns an empty list and the mock mirrors it (unknown `branchId` → `[]`).
+
 ## 0.7.0 — 2026-09-28
 
 Reconciled with server release-1.111.2 (1 tool affected, still 40 tools, no

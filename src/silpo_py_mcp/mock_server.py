@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, ClassVar
 
 from fastmcp import FastMCP
 from fastmcp.server.context import Context
 
 from silpo_py_mcp.models import TimeSlotDeliveryType, UpdateCartDeliveryType
+from silpo_py_mcp.slot_time import parse_slot_bound as _parse_slot_bound
 
 #: ``deliveryType`` values accepted by ``silpo_update_shopping_cart`` (release-1.111.3).
 _UPDATE_CART_DELIVERY_TYPES: tuple[str, ...] = tuple(member.value for member in UpdateCartDeliveryType)
@@ -296,23 +297,6 @@ NOVA_POSHTA_OFFICES = [
 # ---------------------------------------------------------------------------
 # Mock server
 # ---------------------------------------------------------------------------
-
-
-def _parse_slot_bound(value: str, field: str) -> datetime:
-    """Normalize a ``start``/``end`` bound the way release-1.111.2 does.
-
-    ``Z``/``+00:00`` offsets and naive local stamps are read as UTC;
-    date-only and unparseable values are rejected (the live server answers
-    with a bare ``400 Bad Request``).
-    """
-    normalized = re.sub(r"\.\d+(?=(Z|[+-]\d{2}:?\d{2}|$))", "", value)
-    try:
-        if "T" not in normalized:
-            raise ValueError
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        raise ValueError(f"API returned 400 Bad Request: {field}={value!r} is not a valid ISO date-time") from None
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
 
 
 class SilpoMockServer:
@@ -649,6 +633,13 @@ class SilpoMockServer:
             unavailable), ``minOrderCost`` is reported only here, ``serviceFee``
             is a preview that ``cart.calculation.serviceFee.total`` supersedes,
             and all slot times are UTC.
+
+            Release-1.111.4 made the date normalizer more lenient
+            (whitespace, lowercase ``z``, comma fractions, ``+HHMM``/``+HH``
+            offsets and a space separator are read as UTC) and added a
+            ``total`` to the live response (``{success, summary, slots,
+            total}``); the mock keeps returning the bare slot list, which the
+            typed client unwraps from either shape.
             """
             if limit is not None and not 1 <= limit <= 100:
                 raise ValueError(f"limit must be between 1 and 100, got {limit}")
@@ -953,8 +944,14 @@ class SilpoMockServer:
             timeslotStart: str,
             timeslotEnd: str,
         ) -> list[dict[str, Any]]:
-            """Active promotions and discounts."""
-            _ = (branchId, deliveryType, timeslotStart, timeslotEnd)
+            """Active promotions and discounts.
+
+            Mirrors server release-1.111.4: an unknown branch returns an
+            empty list instead of the previous ``500`` error.
+            """
+            _ = (deliveryType, timeslotStart, timeslotEnd)
+            if branchId not in {branch["branchId"] for branch in BRANCHES}:
+                return []
             return PROMOTIONS
 
         @self._fastmcp.tool
@@ -1115,7 +1112,14 @@ class SilpoMockServer:
             shoppingCartId: str,
             products: list[dict[str, Any]],
         ) -> dict[str, Any]:
-            """Add products or update quantities in the cart."""
+            """Add products or update quantities in the cart.
+
+            ``products`` entries carry ``productId`` + ``companyId`` +
+            ``branchId`` plus ``quantity`` (kilograms for weighted products);
+            omitted/false ``addQuantity`` replaces the line quantity while
+            ``true`` adds to it, and ``comment`` holds per-line instructions.
+            Clarified in release-1.111.4; behavior is unchanged.
+            """
             cid = shoppingCartId
             if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")

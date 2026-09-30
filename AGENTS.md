@@ -128,7 +128,12 @@ Key design decisions:
   `children`, `silpo_get_shopping_cart_by_id` gained the payment-type list
   and delivery-discount fields, `silpo_update_shopping_cart` tightened its
   schema, and the `get_time_slots` / product-object descriptions were
-  reworked (all below).
+  reworked (all below); reconciled with server release-1.111.4 on Sep 30
+  2026 — still 40 tools, no renames, no required-set changes;
+  `silpo_get_promotions` returns `[]` for an unknown branch (was 500),
+  `silpo_get_time_slots` has a more lenient date normalizer plus a `total`
+  in the response, and `silpo_add_or_update_cart_products` has a clarified
+  description (all below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
@@ -260,6 +265,28 @@ Key design decisions:
   - `__version__` is read from the installed distribution metadata instead of
     being hardcoded — it had silently drifted to `0.5.2` while the package was
     at `0.7.0`. Never hardcode it again.
+- **Release-1.111.4 changes (client 0.8.1).**
+  - **`silpo_get_promotions` 500 fix:** an unknown `branchId` returns `[]`
+    instead of the previous `500`. The mock mirrors it (unknown branch → `[]`)
+    and `get_promotions` documents the empty-means-no-promotions contract.
+  - **`silpo_get_time_slots` date normalizer** is more lenient: surrounding
+    whitespace, lowercase `z`, comma fractions, `+HHMM`/`+HH` offsets and a
+    space separator are all accepted and read as UTC. The logic lives in the
+    new `silpo_py_mcp.slot_time` module (`strip_millis`/`normalize_slot_bound`/
+    `parse_slot_bound`, single source for the client pre-validation and the
+    mock window filtering); `client._strip_millis`/`_normalize_slot_bound`
+    stay as aliases. Date-only/unparseable values still fail fast
+    (`ValueError` client-side, `400` on the wire).
+  - **`silpo_get_time_slots` total response:** the live response now carries
+    `total` alongside `slots` (`{success, summary, slots, total}`).
+    `get_time_slots` unwraps `slots`/`timeSlots`/`deliveryTimeSlots` and
+    ignores the count (it always equals `len(slots)`); the mock keeps
+    returning the bare list, which the client unwraps from either shape.
+  - **`silpo_add_or_update_cart_products` description** clarified
+    (documentation only, no schema change): full line shape, replace-vs-add,
+    kilograms for weighted products, `get_cart_by_id` afterwards. Client and
+    mock docstrings carry it; `examples/real_smoke.py` logs the live tool
+    description and probes the other three fixes.
 - **Release-1.110.0 `silpo_get_product_details` fix.** The server no longer
   returns stale catalog-wide `displayPrice`/`price` — pricing and
   availability are the requested branch's real offer, with an explicit

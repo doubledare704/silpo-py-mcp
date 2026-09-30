@@ -35,7 +35,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from fastmcp import Client as FastMCPClient
 
-from silpo_py_mcp import auth, config, exceptions, models, tools
+from silpo_py_mcp import auth, config, exceptions, models, slot_time, tools
 from silpo_py_mcp.auth import (
     SilpoOAuthError,
     build_encrypted_token_storage,
@@ -210,5 +210,6 @@ __all__ = [
     "config",
     "exceptions",
     "models",
+    "slot_time",
     "tools",
 ]
