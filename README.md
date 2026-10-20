@@ -7,9 +7,9 @@ Built on [FastMCP `3.4.7`](https://gofastmcp.com/) for the *Silpo AI Factory*
 hackathon. One library, two modes:
 
 - **Real server** — Streamable HTTP transport with OAuth 2.1 + PKCE, encrypted
-  on-disk token storage, 40 typed methods mirroring the documented
+  on-disk token storage, typed methods mirroring the documented
   `silpo_*` tools.
-- **In-memory mock** — a FastMCP server that implements the same 40 tools with
+- **In-memory mock** — a FastMCP server that implements the same 42 tools with
   realistic fixtures, so you can develop and test without a Silpo account.
 
 Requires **Python 3.12+**.
@@ -46,7 +46,7 @@ async def main() -> None:
             print(product.title, product.price)
 
         cart = await client.get_cart()
-        await client.add_or_update_cart_products(
+        await client.add_cart_products(
             cart.cart_id,
             [
                 {
@@ -102,14 +102,25 @@ asyncio.run(main())
 > required-set changes, with the promotions/time-slots/cart-description
 > fixes below; reconciled with server release-1.111.5 on Sep 30 2026 —
 > still 40 tools, no renames, no required-set changes, with the gateway
-> coupon below). Context
+> coupon below; reconciled with server release-1.112.1 on Oct 20 2026 —
+> **42 tools** now: the cart-product tools were split and `get_product_sets`
+> moved to its v2 endpoint, see the release-1.112.1 section below).
+> Context
 > arguments such as
 > `branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd` are required where
 > the live schema requires them — since 1.110.1 this includes
 > `silpo_get_similar_products` — cart tools take `shoppingCartId`, and
-> `silpo_add_or_update_cart_products` takes `products`
-> (`[{productId, companyId, branchId, quantity, addQuantity?, comment?}]` —
-> omitted/false `addQuantity` replaces the quantity, `true` adds to it).
+> since release-1.112.1 the cart-product tools are split:
+> `silpo_add_cart_products` takes `products`
+> (`[{productId, companyId, branchId, quantity, comment?}]`) for products that
+> are **not** in the cart yet, while `silpo_update_cart_products` takes
+> `products` (`[{id, quantity, comment?}]`) for products that **are** in it —
+> `id` is the cart line-item id (`cart.shipments[].products[].id`), not the
+> product id, and `quantity` is the **new total**, not a delta.
+> `silpo_remove_cart_products` takes `products` (`[{id}]`) — the same
+> line-item id. The old `silpo_add_or_update_cart_products` is deprecated on
+> the server (every call fails with a pointer to the two replacements); the
+> client keeps a compatibility shim that routes to them.
 > `silpo_add_or_update_certificates` takes `certificatesToAdd`/
 > `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
 > strings are converted automatically). Product results carry `displayPrice`
@@ -186,6 +197,17 @@ asyncio.run(main())
 |---|---|
 | `get-coupon-details` gateway coupons | The response now carries `successorThreshold` (`promoId`/`amount`/`description`/`rewardText`, `null` for ordinary coupons). A non-null value means the coupon unlocks a *different* promo once the threshold is spent (e.g. Yezzz!: spend ₴2000 → `безкоштовний зв'язок`) — exposed as `CouponDetail.successor_threshold` with the `is_gateway` helper; `progress` tracks toward that threshold. The mock returns the live gateway shape for fixture id `600971427`. |
 
+### release-1.112.1 (client 0.9.0) — breaking
+
+| Change | Detail |
+|---|---|
+| Cart-product tools split | `silpo_add_or_update_cart_products` is **deprecated** — the server now answers every call with an error pointing to its replacements. Use `add_cart_products` for products that are not in the cart yet (`{productId, companyId, branchId, quantity, comment?}`) and `update_cart_products` for products that already are (`{id, quantity, comment?}`). The old typed method still works as a **deprecated shim**: it reads the cart, routes every line to the right tool and emulates the old `addQuantity` semantics (it raises a `DeprecationWarning`). |
+| `remove_cart_products` takes line-item ids | **Breaking:** the server now expects the **cart line-item id** (`cart.shipments[].products[].id`), not the product id — the old shape is rejected by the schema (`-32602`) and an unknown id is dropped silently. `remove_cart_products(cart_id, line_ids)` sends `products: [{"id": …}]`; `remove_cart_products_by_product(cart_id, product_id)` resolves the product id to the line id for you. |
+| Update quantities are absolute | `update_cart_products` has no "add N more" mode: `quantity` is the **new total**. Read the current quantity from the cart and send `current + N` to increase it. |
+| Cart lines are first-class | `SilpoCart.lines` normalizes the cart lines of both transports (`CartLine`), with `line.id` (the line-item id), `line.product_id`, `line.quantity`; `cart.line_ids`, `cart.line_for(product_id)` and `cart.line_by_id(line_id)` are the helpers. |
+| `get_product_sets` moved to v2 | The tool now takes **only** `branchId` — `deliveryType` is gone from the live schema. `get_product_sets(branch_id)` no longer sends it; the deprecated `delivery_type` keyword is accepted but ignored (with a `DeprecationWarning`). |
+| `find_products_batch` runs on the new search | The tool schema is unchanged, but the results now come from the new search version and carry the same fields as `get_products` (`id`/`name`/`slug`/`price`/`displayPrice`/`stock`/`available`/`weighted`/`step`/`displayRatio`/`companyId`/`branchId`/`externalProductId`) — `product_id`/`company_id`/`branch_id` can be fed straight into `add_cart_products`. |
+
 ### Smoke test against the real server
 
 `examples/real_smoke.py` verifies the live contract and runs a read-only
@@ -198,7 +220,7 @@ uv run examples/real_smoke.py
 On the first run a browser opens for login at `auth.silpo.ua`; afterwards the
 encrypted token in `~/.silpo_py_mcp` is reused. The script checks:
 
-- live `tools/list` matches the 40 documented tools and prints every live
+- live `tools/list` matches the 42 documented tools and prints every live
   signature (arg names/types),
 - a read-only battery of `call_tool` calls built from the live schemas
   (branches, address, delivery types, time slots, categories tree, promotions,
@@ -255,12 +277,41 @@ The exact tool schemas (arguments, JSON Schema) are only known from
 - **`list_tools()`** — the live schemas from the server.
 - **`call_tool(name, arguments)`** — pass-through calls with typed error mapping.
 - **Typed convenience methods** — wrappers over the live tool schemas
-  (`get_products`, `get_cart_by_id`, `add_or_update_cart_products`, ...).
+  (`get_products`, `get_cart_by_id`, `add_cart_products`, ...).
 
 If Silpo renames or reshapes tools, only the affected convenience method needs
 updating; `call_tool` keeps working.
 
 ## Working with the cart
+
+Since release-1.112.1 the cart-product tools are split, so adding a product and
+changing its quantity are different calls — and both address the cart
+*line-item*, not the product:
+
+```python
+cart = await client.get_cart_by_id(cart_id)
+
+# add a product that is not in the cart yet
+await client.add_cart_products(
+    cart_id,
+    [{"productId": product.product_id, "companyId": product.company_id, "branchId": product.branch_id, "quantity": 2}],
+)
+
+# change the quantity of a product that is already in it — the quantity is
+# the new total, so read the current one first
+cart = await client.get_cart_by_id(cart_id)
+line = cart.line_for(product.product_id)
+assert line is not None and line.id
+await client.update_cart_products(cart_id, [{"id": line.id, "quantity": line.quantity + 1}])
+
+# remove a line by its line-item id (or by product id, via the helper)
+await client.remove_cart_products(cart_id, [line.id])
+await client.remove_cart_products_by_product(cart_id, product.product_id)
+```
+
+`success: true` only means the request was accepted — a quantity above the
+stock surfaces later in the cart `validations`, and an unknown id is dropped
+silently, so always re-read the cart with `get_cart_by_id` to verify.
 
 Since release-1.111.3 the update tool wants the cart's own `address` and
 `shipments` copied back verbatim, so read them off `cart.update_payloads`
@@ -323,7 +374,7 @@ uv run pre-commit install  # install git hooks (format/lint/type/tests)
 ```
 src/silpo_py_mcp/
 ├── client.py          # SilpoClient — typed methods + error mapping
-├── mock_server.py     # SilpoMockServer — in-memory FastMCP server (40 tools)
+├── mock_server.py     # SilpoMockServer — in-memory FastMCP server (42 tools)
 ├── auth.py            # OAuth 2.1 + PKCE helper, encrypted token storage
 ├── config.py          # pydantic-settings configuration
 ├── exceptions.py      # typed exceptions

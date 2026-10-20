@@ -8,7 +8,7 @@ __all__ = ["SilpoTool"]
 
 
 class SilpoTool(StrEnum):
-    """Typed enumeration of the 40 documented ``silpo_*`` tools."""
+    """Typed enumeration of the 42 documented ``silpo_*`` tools."""
 
     # Location & delivery (6)
     FIND_ADDRESS = "silpo_find_address"
@@ -32,15 +32,19 @@ class SilpoTool(StrEnum):
     GET_CATEGORIES = "silpo_get_categories"
     GET_CATEGORIES_TREE = "silpo_get_categories_tree"
     GET_PRODUCT_SETS = "silpo_get_product_sets"
-    # Cart (8)
+    # Cart (10)
     GET_MY_SHOPPING_CART = "silpo_get_my_shopping_cart"
     CREATE_SHOPPING_CART = "silpo_create_shopping_cart"
     GET_SHOPPING_CART_BY_ID = "silpo_get_shopping_cart_by_id"
-    ADD_OR_UPDATE_CART_PRODUCTS = "silpo_add_or_update_cart_products"
+    ADD_CART_PRODUCTS = "silpo_add_cart_products"
+    UPDATE_CART_PRODUCTS = "silpo_update_cart_products"
     REMOVE_CART_PRODUCTS = "silpo_remove_cart_products"
     CLEAR_SHOPPING_CART = "silpo_clear_shopping_cart"
     UPDATE_SHOPPING_CART = "silpo_update_shopping_cart"
     ADD_OR_UPDATE_CERTIFICATES = "silpo_add_or_update_certificates"
+    #: Deprecated in release-1.112.1 — the server answers with an error that
+    #: points to ``silpo_add_cart_products``/``silpo_update_cart_products``.
+    ADD_OR_UPDATE_CART_PRODUCTS = "silpo_add_or_update_cart_products"
     # Orders (2)
     GET_MY_ONLINE_ORDERS = "silpo_get_my_online_orders"
     GET_MY_OFFLINE_ORDERS = "silpo_get_my_offline_orders"

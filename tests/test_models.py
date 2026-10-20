@@ -80,6 +80,70 @@ def test_cart_alias_parsing() -> None:
     assert len(cart.items) == 1
 
 
+def test_cart_lines_are_normalized_from_the_live_shape() -> None:
+    """release-1.112.1: the live lines carry both the line-item id and the product id."""
+    cart = SilpoCart.model_validate(
+        {
+            "cartId": "cart-1",
+            "shipments": [
+                {
+                    "companyId": "c1",
+                    "branchId": "b1",
+                    "products": [
+                        {
+                            "id": "line-1",
+                            "productId": "p1",
+                            "companyId": "c1",
+                            "branchId": "b1",
+                            "name": "Молоко",
+                            "quantity": 2.0,
+                            "price": 36.9,
+                            "total": 73.8,
+                            "stock": 10.0,
+                            "weighted": False,
+                            "addToBasketStep": 1.0,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    lines = cart.lines
+    assert len(lines) == 1
+    assert lines[0].id == "line-1"
+    assert lines[0].product_id == "p1"
+    assert lines[0].name == "Молоко"
+    assert lines[0].quantity == 2.0
+    assert cart.line_ids == ["line-1"]
+    assert cart.line_for("p1") == lines[0]
+    assert cart.line_by_id("line-1") == lines[0]
+    assert cart.line_for("unknown") is None
+
+
+def test_cart_lines_fall_back_to_the_mock_items() -> None:
+    cart = SilpoCart.model_validate(
+        {
+            "cartId": "cart-1",
+            "items": [
+                {
+                    "id": "line-1",
+                    "productId": "p1",
+                    "title": "Молоко",
+                    "quantity": 2.0,
+                    "unitPrice": 36.9,
+                    "totalPrice": 73.8,
+                }
+            ],
+        }
+    )
+    lines = cart.lines
+    assert len(lines) == 1
+    assert lines[0].id == "line-1"
+    assert lines[0].name == "Молоко"
+    assert lines[0].price == 36.9
+    assert lines[0].total == 73.8
+
+
 def test_time_slot_alias_parsing() -> None:
     slot = TimeSlot.model_validate(
         {

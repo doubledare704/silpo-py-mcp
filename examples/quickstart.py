@@ -52,21 +52,23 @@ async def main() -> None:
                     }
                 )
 
-        # 4. Fill the cart
-        updated = await client.add_or_update_cart_products(cart.cart_id, items)
-        filled = f"{len(updated.cart.items)} items — total {updated.cart.totals.total_price} UAH"
+        # 4. Fill the cart (release-1.112.1: adding and updating are separate
+        # tools — this adds the products that are not in the cart yet)
+        await client.add_cart_products(cart.cart_id, items)
+        filled_cart = await client.get_cart_by_id(cart.cart_id)
+        filled = f"{len(filled_cart.lines)} items — total {filled_cart.totals.total_price} UAH"
         print(f"[cart] filled with {filled}")
 
         # 5. Offer/apply bonuses (documented workflow)
-        loyalty = updated.cart.loyalty
+        loyalty = filled_cart.loyalty
         if loyalty.can_offer_bonuses:
             print(f"[loyalty] {loyalty.bonus_available:.1f} балабонусів available — applying all.")
             # release-1.111.3: address and shipments are copied from the cart
             # as-is — never hand-built — so read them off update_payloads.
-            payloads = updated.cart.update_payloads
+            payloads = filled_cart.update_payloads
             updated = await client.update_shopping_cart(
                 cart.cart_id,
-                updated.cart.delivery_type,
+                filled_cart.delivery_type,
                 payloads.timeslot,
                 payloads.address,
                 payloads.shipments,

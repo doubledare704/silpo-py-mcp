@@ -377,7 +377,7 @@ class SilpoMockServer:
             "deliveryType": delivery_type,
             "timeslot": {"start": "2026-09-02T08:00:00+00:00", "end": "2026-09-02T10:00:00+00:00"},
             "address": address,
-            "shipments": shipments,
+            "shipments": [dict(shipment) for shipment in shipments],
             "items": [],
             "totals": {
                 "totalPrice": 0.0,
@@ -399,8 +399,23 @@ class SilpoMockServer:
             "checkoutWebLink": f"https://silpo.ua/cart/{cart_id}",
             "checkoutMobileLink": f"silpo://cart/{cart_id}",
         }
+        self._sync_cart_lines(cart)
         self._build_calculation(cart)
         return cart
+
+    @staticmethod
+    def _sync_cart_lines(cart: dict[str, Any]) -> None:
+        """Mirror the cart lines into the shipments, as the live cart does.
+
+        Since release-1.112.1 the live cart nests the lines under
+        ``shipments[].products[]`` and every line carries a line-item ``id`` —
+        the key the cart-product tools address lines by. The mock keeps its
+        flat ``items`` list as the single source of truth and mirrors it here.
+        """
+        items = cart.get("items") or []
+        for shipment in cart.get("shipments") or []:
+            if isinstance(shipment, dict):
+                shipment["products"] = items
 
     @staticmethod
     def _service_fee_for(delivery_type: str) -> float:
@@ -444,13 +459,14 @@ class SilpoMockServer:
         return {"type": "Unknown", "types": types, "loan": loan}
 
     def _recompute_totals(self, cart: dict[str, Any]) -> None:
-        items_price = sum(item["totalPrice"] for item in cart["items"])
+        items_price = sum(item["total"] for item in cart["items"])
         bonus_applied = min(cart["loyalty"].get("bonusApplied", 0.0), items_price)
         cart["loyalty"]["bonusApplied"] = round(bonus_applied, 2)
         cart["totals"]["itemsPrice"] = round(items_price, 2)
         cart["totals"]["deliveryPrice"] = 0.0
         cart["totals"]["totalPrice"] = round(items_price - bonus_applied, 2)
-        cart["totals"]["discount"] = round(sum(item.get("discount", 0.0) for item in cart["items"]), 2)
+        cart["totals"]["discount"] = round(sum(item.get("subDiscount", 0.0) for item in cart["items"]), 2)
+        self._sync_cart_lines(cart)
         self._build_calculation(cart)
 
     def _build_calculation(self, cart: dict[str, Any]) -> None:
@@ -1025,11 +1041,19 @@ class SilpoMockServer:
         @self._fastmcp.tool
         def silpo_get_product_sets(
             branchId: str,
-            deliveryType: str | None = None,
-        ) -> list[dict[str, Any]]:
-            """Curated product sets."""
-            _ = (branchId, deliveryType)
-            return PRODUCT_SETS
+        ) -> dict[str, Any]:
+            """Curated product sets of a branch.
+
+            Mirrors the release-1.112.1 v2 endpoint: ``branchId`` is the only
+            argument and the response is the standard envelope with a ``sets``
+            list.
+            """
+            _ = (branchId,)
+            return {
+                "success": True,
+                "summary": f"Found {len(PRODUCT_SETS)} product sets",
+                "sets": PRODUCT_SETS,
+            }
 
     # Cart (8)
     def _register_cart_tools(self) -> None:
@@ -1104,66 +1128,161 @@ class SilpoMockServer:
             totals = cart.get("totals")
             if isinstance(totals, dict):
                 totals.setdefault("serviceFee", cart["serviceFee"])
+            self._sync_cart_lines(cart)
             self._build_calculation(cart)
             return cart
 
         @self._fastmcp.tool
         def silpo_add_or_update_cart_products(
+            shoppingCartId: str | None = None,
+            products: list[dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
+            """Deprecated — split into silpo_add_cart_products and silpo_update_cart_products.
+
+            Mirrors the live release-1.112.1 behaviour: the tool is still
+            listed but every call fails with a pointer to its replacements.
+            """
+            _ = (shoppingCartId, products)
+            raise ValueError(
+                "This tool has been split and is no longer available. Use silpo_add_cart_products "
+                "to add a new product to the cart (productId/companyId/branchId/quantity), or "
+                "silpo_update_cart_products to change the quantity of a product already in the cart "
+                "(requires the cart line-item id from silpo_get_shopping_cart_by_id "
+                "cart.shipments[].products[].id, not productId)."
+            )
+
+        @self._fastmcp.tool
+        def silpo_add_cart_products(
             shoppingCartId: str,
             products: list[dict[str, Any]],
         ) -> dict[str, Any]:
-            """Add products or update quantities in the cart.
+            """Add new products to the cart (release-1.112.1).
 
-            ``products`` entries carry ``productId`` + ``companyId`` +
-            ``branchId`` plus ``quantity`` (kilograms for weighted products);
-            omitted/false ``addQuantity`` replaces the line quantity while
-            ``true`` adds to it, and ``comment`` holds per-line instructions.
-            Clarified in release-1.111.4; behavior is unchanged.
+            Each entry needs ``productId`` + ``companyId`` + ``branchId`` plus a
+            ``quantity`` (kilograms for weighted products); ``comment`` holds
+            per-line instructions. Adding a product that is already in the
+            cart fails — use ``silpo_update_cart_products`` for it.
             """
             cid = shoppingCartId
             if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
             cart = self._carts[cid]
+            added: list[dict[str, Any]] = []
             for incoming in products:
                 product = self._find_product(incoming["productId"])
                 if product is None:
                     raise ValueError(f"Product not found: {incoming['productId']}")
-                quantity = float(incoming.get("quantity", 1))
                 existing = next((i for i in cart["items"] if i["productId"] == product["productId"]), None)
                 if existing is not None:
-                    if incoming.get("addQuantity"):
-                        quantity = float(existing.get("quantity", 0.0)) + quantity
-                    cart["items"].remove(existing)
+                    raise ValueError(
+                        f"Product {product['productId']} is already in the cart; "
+                        "use silpo_update_cart_products to change its quantity"
+                    )
+                quantity = float(incoming.get("quantity", 1))
+                if quantity <= 0:
+                    raise ValueError("quantity must be greater than 0")
+                total = round(float(product["price"]) * quantity, 2)
                 line = {
+                    "id": f"line-{uuid.uuid4().hex[:8]}",
                     "productId": product["productId"],
-                    "companyId": product["companyId"],
-                    "branchId": product["branchId"],
-                    "title": product["title"],
+                    "companyId": product.get("companyId") or incoming.get("companyId"),
+                    "branchId": product.get("branchId") or incoming.get("branchId"),
+                    "name": product["title"],
+                    "slug": product.get("slug"),
                     "quantity": quantity,
-                    "unitPrice": product["price"],
-                    "totalPrice": round(product["price"] * quantity, 2),
-                    "isAvailable": product["isAvailable"],
+                    "price": float(product["price"]),
+                    "oldPrice": product.get("oldPrice"),
+                    "subTotal": total,
+                    "subDiscount": 0.0,
+                    "total": total,
+                    "stock": product.get("stock"),
+                    "weighted": product.get("weighted"),
+                    "addToBasketStep": product.get("step", 1.0),
+                    "isAvailable": product.get("isAvailable", True),
+                    "comment": incoming.get("comment"),
                 }
+                cart["items"].append(line)
+                added.append({"productId": product["productId"], "quantity": quantity})
+            self._recompute_totals(cart)
+            return {
+                "success": True,
+                "summary": f"Added {len(added)} product(s)",
+                "products": added,
+            }
+
+        @self._fastmcp.tool
+        def silpo_update_cart_products(
+            shoppingCartId: str,
+            products: list[dict[str, Any]],
+        ) -> dict[str, Any]:
+            """Change the quantity of products already in the cart (release-1.112.1).
+
+            Each entry needs the cart line-item ``id`` (not the product id) plus
+            the **new total** ``quantity`` — there is no "add N more" mode.
+            """
+            cid = shoppingCartId
+            if cid not in self._carts:
+                raise ValueError(f"Cart not found: {cid}")
+            cart = self._carts[cid]
+            updated: list[dict[str, Any]] = []
+            for index, incoming in enumerate(products):
+                line_id = incoming.get("id")
+                if not line_id:
+                    raise ValueError(
+                        f"products[{index}].id is required (release-1.112.1); it is the cart "
+                        "line-item id, not the product id"
+                    )
+                quantity = float(incoming.get("quantity", 0))
+                if quantity <= 0:
+                    raise ValueError(f"products[{index}].quantity must be greater than 0")
+                line = next((i for i in cart["items"] if i["id"] == line_id), None)
+                if line is None:
+                    continue
+                line["quantity"] = quantity
+                line["subTotal"] = round(float(line["price"]) * quantity, 2)
+                line["total"] = line["subTotal"]
                 if incoming.get("comment") is not None:
                     line["comment"] = incoming["comment"]
-                cart["items"].append(line)
+                updated.append({"id": line_id, "quantity": quantity})
             self._recompute_totals(cart)
-            return {"cart": cart, "changed": True}
+            return {
+                "success": True,
+                "summary": f"Updated {len(updated)} product(s)",
+                "products": updated,
+            }
 
         @self._fastmcp.tool
         def silpo_remove_cart_products(
             shoppingCartId: str,
             products: list[dict[str, Any]],
         ) -> dict[str, Any]:
-            """Remove specific products from the cart."""
+            """Remove products from the cart by their cart line-item id (release-1.112.1).
+
+            The live server addresses the lines by ``products[].id`` — the
+            ``cart.shipments[].products[].id`` of the cart response — and
+            rejects the old ``productId`` shape.
+            """
             cid = shoppingCartId
             if cid not in self._carts:
                 raise ValueError(f"Cart not found: {cid}")
             cart = self._carts[cid]
-            ids = {str(p.get("productId") or p.get("id")) for p in products if p.get("productId") or p.get("id")}
-            cart["items"] = [i for i in cart["items"] if i["productId"] not in ids]
+            ids: list[str] = []
+            for index, incoming in enumerate(products):
+                line_id = incoming.get("id")
+                if not line_id:
+                    raise ValueError(
+                        f"products[{index}].id is required (release-1.112.1); it is the cart "
+                        "line-item id, not the product id"
+                    )
+                ids.append(str(line_id))
+            removed = set(ids)
+            cart["items"] = [i for i in cart["items"] if i["id"] not in removed]
             self._recompute_totals(cart)
-            return {"cart": cart, "changed": True}
+            return {
+                "success": True,
+                "summary": f"Removed {len(removed)} product(s)",
+                "products": [{"id": line_id} for line_id in ids],
+            }
 
         @self._fastmcp.tool
         def silpo_clear_shopping_cart(shoppingCartId: str) -> dict[str, Any]:
@@ -1231,7 +1350,8 @@ class SilpoMockServer:
             cart["deliveryType"] = deliveryType
             cart["timeslot"] = timeslot
             cart["address"] = address
-            cart["shipments"] = shipments
+            cart["shipments"] = [dict(shipment) for shipment in shipments if isinstance(shipment, dict)]
+            self._sync_cart_lines(cart)
             if not branchId and shipments and isinstance(shipments[0], dict):
                 branchId = shipments[0].get("branchId")
             fee = self._service_fee_for(deliveryType)

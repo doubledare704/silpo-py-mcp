@@ -40,11 +40,13 @@ EXPECTED_TOOLS: list[str] = [
     "silpo_get_my_shopping_cart",
     "silpo_create_shopping_cart",
     "silpo_get_shopping_cart_by_id",
-    "silpo_add_or_update_cart_products",
+    "silpo_add_cart_products",
+    "silpo_update_cart_products",
     "silpo_remove_cart_products",
     "silpo_clear_shopping_cart",
     "silpo_update_shopping_cart",
     "silpo_add_or_update_certificates",
+    "silpo_add_or_update_cart_products",
     "silpo_get_my_online_orders",
     "silpo_get_my_offline_orders",
     "silpo_get_my_profile",
@@ -64,6 +66,10 @@ EXPECTED_TOOLS: list[str] = [
 # with filled arguments. Write tools are probed once — a second call is
 # rate-limited server-side.
 WRITE_TOOLS: set[str] = {"silpo_create_shopping_cart"}
+
+# release-1.112.1: still listed, but every call is rejected with a pointer to
+# its replacements — an expected rejection, not a battery failure.
+DEPRECATED_TOOLS: set[str] = {"silpo_add_or_update_cart_products"}
 
 TEST_LOCATION = {
     "latitude": 50.40895681476332,
@@ -605,17 +611,24 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
         print(f"  · unknown-branch promotions: {_short(promos)} (release-1.111.4 expects [])")
     elif isinstance(unknown_promos, list):
         print(f"  · unknown-branch promotions: {len(unknown_promos)} items (release-1.111.4 expects [])")
-    cart_tool = by_name.get("silpo_add_or_update_cart_products")
+    cart_tool = by_name.get("silpo_add_cart_products")
     if cart_tool is not None:
-        print(f"  · add-or-update-cart-products description: {(cart_tool.description or '')[:160]!r}")
+        print(f"  · add-cart-products description: {(cart_tool.description or '')[:160]!r}")
+    update_tool = by_name.get("silpo_update_cart_products")
+    if update_tool is not None:
+        print(f"  · update-cart-products description: {(update_tool.description or '')[:160]!r}")
+    deprecated_tool = by_name.get("silpo_add_or_update_cart_products")
+    if deprecated_tool is not None:
+        print(f"  · deprecated tool still listed: {(deprecated_tool.description or '')[:120]!r}")
     await check(
         "silpo_get_popular_categories",
         {"branchId": state["branchId"], "deliveryType": state["deliveryType"]},
         retries=1,
     )
+    # release-1.112.1: the v2 endpoint takes branchId only
     await check(
         "silpo_get_product_sets",
-        {"branchId": state["branchId"], "deliveryType": state["deliveryType"]},
+        {"branchId": state["branchId"]},
         retries=1,
     )
 
@@ -937,9 +950,12 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 expect="address without addressType is rejected (release-1.111.3)",
             )
 
+        # release-1.112.1: the cart-product tools are split — add (by productId),
+        # update (by cart line-item id, absolute quantity) and remove (by id).
+        # The server rate-limits consecutive writes, so the calls are spaced.
         if state.get("productId"):
-            await check(
-                "silpo_add_or_update_cart_products",
+            added = await check(
+                "silpo_add_cart_products",
                 {
                     "shoppingCartId": cart_id,
                     "products": [
@@ -953,11 +969,33 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 },
                 retries=1,
             )
-            await check(
-                "silpo_remove_cart_products",
-                {"shoppingCartId": cart_id, "products": [{"productId": state["productId"]}]},
-                retries=1,
-            )
+            await asyncio.sleep(1.0)
+            line_id = None
+            if isinstance(added, dict):
+                print(f"  · add-cart-products summary: {added.get('summary')}")
+            refreshed = await check("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id}, retries=1)
+            live_cart = (refreshed or {}).get("cart", refreshed) if isinstance(refreshed, dict) else {}
+            for shipment in (live_cart or {}).get("shipments") or []:
+                for line in (shipment or {}).get("products") or []:
+                    if isinstance(line, dict) and line.get("productId") == state["productId"]:
+                        line_id = line.get("id")
+            print(f"  · cart line-item id for {state['productId']}: {line_id}")
+            if line_id:
+                await asyncio.sleep(1.0)
+                await check(
+                    "silpo_update_cart_products",
+                    {"shoppingCartId": cart_id, "products": [{"id": line_id, "quantity": 2}]},
+                    retries=1,
+                )
+                await asyncio.sleep(1.0)
+                await check(
+                    "silpo_remove_cart_products",
+                    {"shoppingCartId": cart_id, "products": [{"id": line_id}]},
+                    retries=1,
+                )
+            else:
+                print("  · no cart line found, skipping update/remove")
+            await asyncio.sleep(1.0)
             await check("silpo_update_shopping_cart", dict(update_args), retries=1)
             await check(
                 "silpo_add_or_update_certificates",
@@ -966,7 +1004,7 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
             )
             await check("silpo_clear_shopping_cart", {"shoppingCartId": cart_id}, retries=1)
         else:
-            await check("silpo_add_or_update_cart_products", {"shoppingCartId": cart_id, "products": []}, retries=1)
+            await check("silpo_add_cart_products", {"shoppingCartId": cart_id, "products": []}, retries=1)
             await check("silpo_remove_cart_products", {"shoppingCartId": cart_id, "products": []}, retries=1)
             await check("silpo_update_shopping_cart", dict(update_args), retries=1)
             await check(
@@ -975,17 +1013,29 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
                 retries=1,
             )
             await check("silpo_clear_shopping_cart", {"shoppingCartId": cart_id}, retries=1)
+        # release-1.112.1: the deprecated tool is still listed but always fails
+        await expect_rejected(
+            "silpo_add_or_update_cart_products",
+            {"shoppingCartId": cart_id, "products": []},
+            expect="the deprecated tool is rejected (release-1.112.1)",
+        )
     else:
         print("  · no cartId, skipping cart mutation tools")
         for name in [
             "silpo_get_shopping_cart_by_id",
-            "silpo_add_or_update_cart_products",
+            "silpo_add_cart_products",
+            "silpo_update_cart_products",
             "silpo_remove_cart_products",
             "silpo_clear_shopping_cart",
             "silpo_update_shopping_cart",
             "silpo_add_or_update_certificates",
         ]:
             await check(name, {"shoppingCartId": "dummy"}, retries=1)
+        await expect_rejected(
+            "silpo_add_or_update_cart_products",
+            {"shoppingCartId": "dummy", "products": []},
+            expect="the deprecated tool is rejected (release-1.112.1)",
+        )
 
     # -- orders (2) --------------------------------------------------------
     await check("silpo_get_my_online_orders", {"limit": 5, "offset": 0}, retries=1)
@@ -1070,6 +1120,10 @@ async def _run_battery(client: SilpoClient, by_name: dict[str, Any]) -> tuple[in
     if missing_calls:
         print(f"\n  · coverage gap: {missing_calls} — probing with empty args")
         for name in missing_calls:
+            if name in DEPRECATED_TOOLS:
+                # release-1.112.1: the tool is listed but every call is rejected
+                await expect_rejected(name, {}, expect="the deprecated tool is rejected")
+                continue
             if name in WRITE_TOOLS:
                 await check(name, _filter_args(name, ctx()), retries=1)
                 continue

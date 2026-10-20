@@ -80,16 +80,62 @@ def _lift_calculation(cart: dict[str, Any]) -> dict[str, Any]:
 
 
 class CartItem(SilpoModel):
-    """A single product line in the cart."""
+    """A single product line in the cart.
 
+    Accepts both the mock/documented shape (``title``/``unitPrice``/
+    ``totalPrice``) and the live release-1.112.1 shape (``name``/``price``/
+    ``total`` plus the cart line-item ``id``).
+    """
+
+    id: str | None = None
     product_id: str = Field(alias="productId")
     company_id: str = Field(default="", alias="companyId")
     branch_id: str = Field(default="", alias="branchId")
-    title: str
+    title: str = Field(validation_alias=AliasChoices("title", "name"))
     quantity: float
-    unit_price: float = Field(default=0.0, alias="unitPrice")
-    total_price: float = Field(default=0.0, alias="totalPrice")
+    unit_price: float = Field(default=0.0, alias="unitPrice", validation_alias=AliasChoices("unitPrice", "price"))
+    total_price: float = Field(default=0.0, alias="totalPrice", validation_alias=AliasChoices("totalPrice", "total"))
     is_available: bool = Field(default=True, alias="isAvailable")
+
+
+class CartLine(SilpoModel):
+    """A cart line item, in the live release-1.112.1 shape.
+
+    The live server nests the cart lines under
+    ``shipments[].products[]`` and every line carries **two** identifiers:
+
+    * ``id`` — the *cart line-item id*, unique per line. It is the key the
+      cart-product tools need: ``silpo_update_cart_products`` and
+      ``silpo_remove_cart_products`` address lines by this id.
+    * ``productId`` — the catalogue product id, shared by every line of the
+      same product.
+
+    Since release-1.112.1 ``silpo_remove_cart_products`` takes the line-item
+    id, not the product id, so read ``line.id`` before removing a line.
+
+    The mock's flat ``items`` shape is accepted too (``title``/``unitPrice``),
+    so both transports parse into the same model.
+    """
+
+    id: str | None = None
+    product_id: str = Field(validation_alias=AliasChoices("productId", "product_id"))
+    company_id: str | None = Field(default=None, alias="companyId")
+    branch_id: str | None = Field(default=None, alias="branchId")
+    name: str = Field(validation_alias=AliasChoices("name", "title"))
+    quantity: float = 0.0
+    price: float | None = Field(default=None, validation_alias=AliasChoices("price", "unitPrice"))
+    old_price: float | None = Field(default=None, alias="oldPrice")
+    sub_total: float | None = Field(default=None, alias="subTotal")
+    sub_discount: float | None = Field(default=None, alias="subDiscount")
+    total: float | None = Field(default=None, validation_alias=AliasChoices("total", "totalPrice"))
+    stock: float | None = None
+    weighted: bool | None = None
+    add_to_basket_step: float | None = Field(default=None, alias="addToBasketStep")
+    ratio: str | None = None
+    slug: str | None = None
+    image: str | None = None
+    comment: str | None = None
+    is_available: bool | None = Field(default=None, alias="isAvailable")
 
 
 class CartTotals(SilpoModel):
@@ -313,6 +359,11 @@ class SilpoCart(SilpoModel):
     ``calculation.delivery.sub_total``/``sub_discount``. ``payment_type`` is
     the *selected* method and stays ``"Unknown"`` until the guest picks one —
     read ``payment.available_types`` to know what is actually on offer.
+
+    Release-1.112.1 split the cart-product tools, so the cart lines now matter
+    on their own: ``silpo_update_cart_products`` and
+    ``silpo_remove_cart_products`` address a line by its **line-item id**, not
+    by the product id. Read them from :attr:`lines` (or :attr:`line_ids`).
     """
 
     cart_id: str = Field(default="", validation_alias=AliasChoices("cartId", "id"))
@@ -346,6 +397,52 @@ class SilpoCart(SilpoModel):
     def total_to_pay(self) -> float:
         """What the guest actually pays — prefer this over ``totals.total_price``."""
         return self.totals.total_after_discounts or self.totals.total_price
+
+    @property
+    def lines(self) -> list[CartLine]:
+        """The cart lines, in the live release-1.112.1 shape.
+
+        The live server nests them under ``shipments[].products[]``; the mock
+        keeps a flat ``items`` list. Both are normalized into the same
+        :class:`CartLine` objects, so ``line.id`` (the cart line-item id) and
+        ``line.product_id`` are available regardless of the transport.
+        """
+        lines: list[CartLine] = []
+        for shipment in self.shipments:
+            if not isinstance(shipment, dict):
+                continue
+            for raw in shipment.get("products") or []:
+                if isinstance(raw, dict):
+                    lines.append(CartLine.model_validate(raw))
+        if not lines:
+            for item in self.items:
+                lines.append(
+                    CartLine(
+                        id=item.id,
+                        product_id=item.product_id,
+                        company_id=item.company_id,
+                        branch_id=item.branch_id,
+                        name=item.title,
+                        quantity=item.quantity,
+                        price=item.unit_price,
+                        total=item.total_price,
+                        is_available=item.is_available,
+                    )
+                )
+        return lines
+
+    @property
+    def line_ids(self) -> list[str]:
+        """Cart line-item ids — the keys the cart-product tools expect."""
+        return [line.id for line in self.lines if line.id]
+
+    def line_for(self, product_id: str) -> CartLine | None:
+        """Find the line holding ``product_id`` (the catalogue product id)."""
+        return next((line for line in self.lines if line.product_id == product_id), None)
+
+    def line_by_id(self, line_id: str) -> CartLine | None:
+        """Find a line by its cart line-item id."""
+        return next((line for line in self.lines if line.id == line_id), None)
 
     @property
     def available_payment_types(self) -> list[str]:
@@ -392,7 +489,16 @@ class CreateShoppingCartResult(SilpoModel):
 
 
 class CartLineInput(SilpoModel):
-    """A product line to add/update in the cart."""
+    """A product line to add/update in the cart.
+
+    .. deprecated:: release-1.112.1
+        The server split the old ``silpo_add_or_update_cart_products`` tool
+        into ``silpo_add_cart_products`` (new products, addressed by
+        ``productId``) and ``silpo_update_cart_products`` (products already in
+        the cart, addressed by the cart line-item ``id``). Use
+        :class:`CartProductAddInput` and :class:`CartProductUpdateInput`
+        instead; ``add_quantity`` only made sense for the removed tool.
+    """
 
     product_id: str = Field(alias="productId")
     company_id: str = Field(alias="companyId")
@@ -402,12 +508,52 @@ class CartLineInput(SilpoModel):
     comment: str | None = None
 
 
+class CartProductAddInput(SilpoModel):
+    """A product line to add to the cart (``silpo_add_cart_products``).
+
+    Release-1.112.1: adding is for products that are **not** in the cart yet
+    — the server rejects a ``productId`` that is already in the cart and tells
+    you to use :class:`CartProductUpdateInput` instead. Copy ``product_id``,
+    ``company_id`` and ``branch_id`` from the product search results.
+
+    ``quantity`` is in kilograms for weighted products, whatever unit
+    ``displayRatio`` shows.
+    """
+
+    product_id: str = Field(alias="productId")
+    company_id: str = Field(alias="companyId")
+    branch_id: str = Field(alias="branchId")
+    quantity: float = 1.0
+    comment: str | None = None
+
+
+class CartProductUpdateInput(SilpoModel):
+    """A cart line to update (``silpo_update_cart_products``).
+
+    Release-1.112.1: ``id`` is the **cart line-item id**
+    (``cart.shipments[].products[].id`` from ``silpo_get_shopping_cart_by_id``),
+    not the product id, and ``quantity`` is the **new total** — there is no
+    "add N more" mode, so read the current quantity and send ``current + N``.
+    """
+
+    id: str
+    quantity: float
+    comment: str | None = None
+
+
 class CartUpdateResult(SilpoModel):
     """Result of a cart mutation.
 
     The mock returns the full ``cart``; the live server returns only
     ``success``/``summary`` plus ``products``/``shoppingCartId``/``added``/
     ``removed`` — call ``get_cart_by_id`` afterwards to verify the cart.
+
+    Since release-1.112.1 the cart-product tools answer with the affected
+    lines: ``products`` carries ``{productId, quantity}`` for
+    ``silpo_add_cart_products``, ``{id, quantity}`` for
+    ``silpo_update_cart_products`` and ``{id}`` for
+    ``silpo_remove_cart_products``. ``success: true`` only means the request
+    was accepted — the cart still has to be re-read to confirm the change.
     """
 
     success: bool = True

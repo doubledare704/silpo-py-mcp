@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import warnings
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, overload
 
@@ -44,6 +45,8 @@ from silpo_py_mcp.models import (
     Branch,
     CartAddressType,
     CartLineInput,
+    CartProductAddInput,
+    CartProductUpdateInput,
     CartSummary,
     CartUpdateResult,
     CategoriesTree,
@@ -84,7 +87,7 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=SilpoModel)
 
-_JSONRPC_METHOD_NOT_FOUND = -32601
+_JSONRPC_METHOD_NOT_FOUND = "-32601"
 
 
 def _check_update_delivery_type(value: Any) -> str | None:
@@ -239,7 +242,14 @@ class SilpoClient:
     def _raise_mapped(self, name: SilpoTool | str, exc: ToolError) -> None:
         message = str(exc)
         lowered = message.lower()
-        if "not found" in lowered or "method not found" in lowered or "unknown tool" in lowered:
+        # Only a genuine "unknown method" is a missing tool — a server-side
+        # "Resource not found" is a tool execution failure, not a missing tool.
+        if (
+            "method not found" in lowered
+            or "unknown tool" in lowered
+            or "tool not found" in lowered
+            or _JSONRPC_METHOD_NOT_FOUND in message
+        ):
             raise SilpoToolNotFoundError(f"Tool '{name}' not supported by the server: {message}") from exc
         if "429" in message or "rate limit" in lowered or "too many requests" in lowered:
             raise SilpoRateLimitError(f"Rate limited while calling '{name}': {message}") from exc
@@ -480,10 +490,18 @@ class SilpoClient:
     ) -> BatchProductResult:
         """Search up to 30 products in parallel from a shopping list.
 
+        Since release-1.112.1 this tool runs on the **new search version**:
+        the result products now carry the same fields as ``get_products``
+        (``id``/``name``/``slug``/``price``/``displayPrice``/``stock``/
+        ``available``/``weighted``/``step``/``displayRatio``/``companyId``/
+        ``branchId``/``externalProductId``), so ``product_id``, ``company_id``
+        and ``branch_id`` can be fed straight into
+        :meth:`add_cart_products`.
+
         Empty strings and whitespace-only entries are silently skipped by the
         server (see ``dropped_count``) — all-empty input still returns
         ``success:true`` with empty results, never an error. Terms also accept
-        exact numeric article codes (``externalProductId``) and 6+ digit
+        exact numeric article codes (``external_product_id``) and 6+ digit
         barcodes; prefer those over fuzzy names when known, and remember that a
         product absent from the results may simply be out of stock here.
         ``total_found`` carries the live ``queries[].totalFound`` — the real
@@ -821,11 +839,22 @@ class SilpoClient:
         *,
         delivery_type: str | None = None,
     ) -> list[ProductSet]:
-        """Curated product sets."""
-        args: dict[str, Any] = {"branchId": branch_id}
+        """Curated product sets of a branch.
+
+        Release-1.112.1 migrated the tool to the v2 endpoint: ``branchId`` is
+        the only argument now, so ``delivery_type`` is accepted but ignored
+        (passing it is deprecated and it is not sent). The sets are scoped to
+        the branch — use ``get_products(..., product_set=<slug>)`` to browse
+        the products of a set.
+        """
         if delivery_type is not None:
-            args["deliveryType"] = delivery_type
-        payload = await self.call_tool(SilpoTool.GET_PRODUCT_SETS, args)
+            warnings.warn(
+                "get_product_sets no longer takes a delivery type since server "
+                "release-1.112.1 (v2 endpoint); the argument is ignored",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        payload = await self.call_tool(SilpoTool.GET_PRODUCT_SETS, {"branchId": branch_id})
         payload = self._unwrap_payload(payload, "sets")
         return self._validate(payload, ProductSet, many=True)
 
@@ -922,37 +951,161 @@ class SilpoClient:
     ) -> CartUpdateResult:
         """Add products or update quantities in the cart.
 
+        .. deprecated:: release-1.112.1
+            The server split this tool into ``silpo_add_cart_products`` (new
+            products, addressed by ``productId``) and
+            ``silpo_update_cart_products`` (products already in the cart,
+            addressed by the cart line-item ``id``) — the server now answers
+            this tool with an error. This method keeps working by routing each
+            line to the right tool on the client side; use
+            :meth:`add_cart_products` / :meth:`update_cart_products` directly
+            instead.
+
         ``products`` is the full line description the server prices and
         reserves: each entry needs ``productId`` + ``companyId`` + ``branchId``
         (copy all three from product search) plus a ``quantity``. Dict entries
         are sent verbatim; ``CartLineInput`` entries are serialized with
         aliases.
 
-        Quantity semantics (live, clarified in release-1.111.4): if
-        ``addQuantity`` is omitted or false the quantity you send becomes the
-        new line total (replace); set ``addQuantity: true`` to increase the
-        existing quantity by the given amount. For weighted products
-        (``weighted: true``) ``quantity`` and ``step`` are always kilograms,
-        whatever ``displayRatio`` shows. ``comment`` carries per-line special
-        instructions. The server does not echo the full cart — call
-        ``get_cart_by_id`` afterwards to verify the result.
+        Quantity semantics of the removed tool: if ``addQuantity`` is omitted
+        or false the quantity you send becomes the new line total (replace);
+        set ``addQuantity: true`` to increase the existing quantity by the
+        given amount. For weighted products (``weighted: true``) ``quantity``
+        is always kilograms, whatever ``displayRatio`` shows. ``comment``
+        carries per-line special instructions.
         """
-        lines: list[dict[str, Any]] = [
-            entry.model_dump(by_alias=True, exclude_none=True) if isinstance(entry, CartLineInput) else entry
+        warnings.warn(
+            "add_or_update_cart_products is deprecated since server release-1.112.1; "
+            "use add_cart_products for new products and update_cart_products for "
+            "products already in the cart",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        cart = await self.get_cart_by_id(cart_id)
+        to_add: list[CartProductAddInput | dict[str, Any]] = []
+        to_update: list[CartProductUpdateInput | dict[str, Any]] = []
+        for entry in products:
+            line = (
+                entry.model_dump(by_alias=True, exclude_none=True) if isinstance(entry, CartLineInput) else dict(entry)
+            )
+            existing = cart.line_for(str(line.get("productId") or ""))
+            if existing is None or not existing.id:
+                to_add.append({key: value for key, value in line.items() if key != "addQuantity"})
+                continue
+            quantity = float(line.get("quantity", 1.0))
+            if line.get("addQuantity"):
+                quantity += existing.quantity
+            update: dict[str, Any] = {"id": existing.id, "quantity": quantity}
+            if line.get("comment") is not None:
+                update["comment"] = line["comment"]
+            to_update.append(update)
+        result: CartUpdateResult | None = None
+        if to_add:
+            result = await self.add_cart_products(cart_id, to_add)
+        if to_update:
+            result = await self.update_cart_products(cart_id, to_update)
+        if result is None:
+            raise ValueError("add_or_update_cart_products received no products")
+        return result
+
+    async def add_cart_products(
+        self,
+        cart_id: str,
+        products: list[CartProductAddInput | dict[str, Any]],
+    ) -> CartUpdateResult:
+        """Add products that are **not** in the cart yet.
+
+        Release-1.112.1 split the cart-product tools: this one adds new
+        products, :meth:`update_cart_products` changes the quantity of a
+        product already in the cart. Adding a product that is already in the
+        cart fails on the server — use ``update_cart_products`` for it.
+
+        Each entry needs ``productId`` + ``companyId`` + ``branchId`` (copy all
+        three from the product search results) plus a ``quantity``; for
+        weighted products the quantity is in kilograms, whatever
+        ``displayRatio`` shows. ``comment`` carries per-line instructions.
+
+        ``success: true`` only means the request was accepted: a quantity
+        above the stock is accepted and surfaces later in the cart
+        ``validations``, and a nonexistent ``productId`` is dropped silently.
+        Call :meth:`get_cart_by_id` afterwards and check that every product is
+        present.
+        """
+        lines = [
+            entry.model_dump(by_alias=True, exclude_none=True)
+            if isinstance(entry, CartProductAddInput)
+            else dict(entry)
             for entry in products
         ]
-        payload = await self.call_tool(
-            SilpoTool.ADD_OR_UPDATE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": lines}
-        )
+        if not lines:
+            raise ValueError("add_cart_products requires at least one product")
+        payload = await self.call_tool(SilpoTool.ADD_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": lines})
         return self._validate(payload, CartUpdateResult)
 
-    async def remove_cart_products(self, cart_id: str, product_ids: list[str]) -> CartUpdateResult:
-        """Remove specific products from the cart."""
-        products = [{"productId": pid} for pid in product_ids]
+    async def update_cart_products(
+        self,
+        cart_id: str,
+        products: list[CartProductUpdateInput | dict[str, Any]],
+    ) -> CartUpdateResult:
+        """Change the quantity of products already in the cart.
+
+        Release-1.112.1: each entry needs the **cart line-item id** — not the
+        product id — taken from ``silpo_get_shopping_cart_by_id``
+        (``cart.shipments[].products[].id``); read it from
+        ``cart.lines``/``cart.line_ids`` of a :class:`~silpo_py_mcp.models.SilpoCart`.
+
+        The quantity is **absolute**: it is the new total, not a delta — there
+        is no "add N more" mode, so read the current quantity and send
+        ``current + N`` to increase it. For weighted products the quantity is
+        in kilograms, whatever ``displayRatio`` shows.
+
+        ``success: true`` only means the request was accepted — an unknown id
+        is dropped silently, so call :meth:`get_cart_by_id` afterwards and
+        check the new quantities.
+        """
+        lines = [
+            entry.model_dump(by_alias=True, exclude_none=True)
+            if isinstance(entry, CartProductUpdateInput)
+            else dict(entry)
+            for entry in products
+        ]
+        if not lines:
+            raise ValueError("update_cart_products requires at least one product")
+        payload = await self.call_tool(SilpoTool.UPDATE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": lines})
+        return self._validate(payload, CartUpdateResult)
+
+    async def remove_cart_products(self, cart_id: str, line_ids: list[str]) -> CartUpdateResult:
+        """Remove cart lines.
+
+        **Breaking change (release-1.112.1):** the server now expects the
+        **cart line-item id** (``cart.shipments[].products[].id``), not the
+        product id — passing a product id is rejected by the schema, and an
+        unknown id is dropped silently. Read the ids from
+        ``cart.line_ids`` of a :class:`~silpo_py_mcp.models.SilpoCart`, or use
+        :meth:`remove_cart_products_by_product` to remove by product id.
+        """
+        if not line_ids:
+            raise ValueError("remove_cart_products requires at least one cart line id")
+        products = [{"id": line_id} for line_id in line_ids]
         payload = await self.call_tool(
             SilpoTool.REMOVE_CART_PRODUCTS, {"shoppingCartId": cart_id, "products": products}
         )
         return self._validate(payload, CartUpdateResult)
+
+    async def remove_cart_products_by_product(self, cart_id: str, product_id: str) -> CartUpdateResult:
+        """Remove the cart line holding ``product_id``.
+
+        A convenience wrapper for the release-1.112.1 split: it reads the
+        cart, resolves the product id to the cart line-item id the server
+        expects and removes that line.
+        """
+        cart = await self.get_cart_by_id(cart_id)
+        line = cart.line_for(product_id)
+        if line is None:
+            raise ValueError(f"No cart line holds product {product_id!r}")
+        if not line.id:
+            raise ValueError(f"Cart line for product {product_id!r} has no line-item id")
+        return await self.remove_cart_products(cart_id, [line.id])
 
     async def clear_cart(self, cart_id: str) -> CartUpdateResult:
         """Clear the entire cart."""

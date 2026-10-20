@@ -89,6 +89,13 @@ async def test_maps_rate_limit() -> None:
         await _client(fake).call_tool("silpo_get_products", {})
 
 
+async def test_resource_not_found_is_not_a_missing_tool() -> None:
+    """A server-side "Resource not found" is a tool failure, not an unknown tool."""
+    fake = _FakeFastMCP(raise_error=ToolError("Error in get-promotions: Resource not found."))
+    with pytest.raises(SilpoToolExecutionError):
+        await _client(fake).call_tool("silpo_get_promotions", {})
+
+
 async def test_surfaces_is_error_results() -> None:
     fake = _FakeFastMCP(result=_result(text="boom", is_error=True))
     with pytest.raises(SilpoToolExecutionError):

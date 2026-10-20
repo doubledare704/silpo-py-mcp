@@ -35,7 +35,7 @@ Validation gate (also installed as pre-commit hooks):
 `ruff format --check` → `ruff check --fix` → `pyrefly check` → `pytest`.
 Always run all four before finishing a change.
 
-## Tool mapping (40 documented tools)
+## Tool mapping (42 documented tools)
 
 The official docs live at <https://ai-factory.silpo.ua/docs/mcp>. Exact
 schemas are only known at runtime via `tools/list` after auth. Tool names,
@@ -47,7 +47,7 @@ takes `pageSize`, `categoryId`, `onSale`). The mock mirrors these exactly.
 | Location/delivery (6) | `silpo_find_address`, `silpo_get_available_delivery_types`, `silpo_list_branches`, `silpo_get_time_slots`, `silpo_find_nova_poshta_settlements`, `silpo_find_nova_poshta_offices` |
 | Product search (7) | `silpo_find_products_batch`, `silpo_get_products`, `silpo_get_product_details`, `silpo_get_similar_products`, `silpo_get_replacements`, `silpo_get_my_favorites`, `silpo_add_or_update_favorite_products` |
 | Catalog (6) | `silpo_get_promotions`, `silpo_get_popular_categories`, `silpo_get_category`, `silpo_get_categories`, `silpo_get_categories_tree`, `silpo_get_product_sets` |
-| Cart (8) | `silpo_get_my_shopping_cart`, `silpo_create_shopping_cart`, `silpo_get_shopping_cart_by_id`, `silpo_add_or_update_cart_products`, `silpo_remove_cart_products`, `silpo_clear_shopping_cart`, `silpo_update_shopping_cart`, `silpo_add_or_update_certificates` |
+| Cart (10) | `silpo_get_my_shopping_cart`, `silpo_create_shopping_cart`, `silpo_get_shopping_cart_by_id`, `silpo_add_cart_products`, `silpo_update_cart_products`, `silpo_remove_cart_products`, `silpo_clear_shopping_cart`, `silpo_update_shopping_cart`, `silpo_add_or_update_certificates`, `silpo_add_or_update_cart_products` (deprecated in 1.112.1) |
 | Orders (2) | `silpo_get_my_online_orders`, `silpo_get_my_offline_orders` |
 | Profile (4) | `silpo_get_my_profile`, `silpo_get_my_delivery_addresses`, `silpo_get_my_family`, `silpo_get_my_food_restrictions` |
 | Loyalty (7) | `silpo_get_loyalty_info`, `silpo_get_my_coupons`, `silpo_get_coupon_details`, `silpo_get_my_promos`, `silpo_get_promo_codes`, `silpo_get_my_certificates`, `silpo_get_my_premium_subscription` |
@@ -67,11 +67,11 @@ takes `pageSize`, `categoryId`, `onSale`). The mock mirrors these exactly.
 ```
 src/silpo_py_mcp/
 ├── client.py        # SilpoClient: typed methods + call_tool passthrough + error mapping
-├── mock_server.py   # SilpoMockServer: in-memory FastMCP server (40 tools, camelCase args)
+├── mock_server.py   # SilpoMockServer: in-memory FastMCP server (42 tools, camelCase args)
 ├── auth.py          # build_encrypted_token_storage + build_oauth (PKCE, DCR, auto-refresh)
 ├── config.py        # SilpoSettings (env prefix SILPO_)
 ├── exceptions.py    # typed exception hierarchy
-├── tools.py         # SilpoTool StrEnum (40 silpo_* names, single source)
+├── tools.py         # SilpoTool StrEnum (42 silpo_* names, single source)
 └── models/          # Pydantic models; camelCase aliases + populate_by_name
 ```
 
@@ -115,7 +115,7 @@ Key design decisions:
   (`client_secret_basic`) and the `mcp` library then sends both a Basic header
   and `client_id` in the body, which the server rejects with "Client must not
   use multiple authentication methods".
-- **All 40 tools are reconciled to the live `tools/list` schemas** (verified
+- **All 42 tools are reconciled to the live `tools/list` schemas** (verified
   live, Sep 2026; re-verified Sep 7 2026; reconciled with server
   release-1.110.0 on Sep 10 2026 — no drift in tool names, arg names or
   required sets; reconciled with server release-1.110.1 on Sep 11 2026;
@@ -136,16 +136,23 @@ Key design decisions:
   description (all below); reconciled with server release-1.111.5 on Sep 30
   2026 — still 40 tools, no renames, no required-set changes;
   `silpo_get_coupon_details` gained `successorThreshold` marking gateway
-  coupons (all below).
+  coupons (all below); reconciled with server release-1.112.1 on Oct 20 2026 —
+  **42 tools** now: the cart-product tools were split
+  (`silpo_add_or_update_cart_products` deprecated),
+  `silpo_remove_cart_products` switched to line-item ids and
+  `silpo_get_product_sets` moved to its v2 endpoint (all below).
   The mock exposes exactly the live argument names and the
   typed methods send exactly the live payloads. Context args
   (`branchId`/`deliveryType`/`timeslotStart`/`timeslotEnd`) are required where
   the live schema requires them — since 1.110.1 this includes
   `silpo_get_similar_products` (breaking: `deliveryType`/`timeslotStart`/
   `timeslotEnd` are now required for accurate stock); cart tools take `shoppingCartId`;
-  `silpo_add_or_update_cart_products` takes `products`
-  (`[{productId, companyId, branchId, quantity, addQuantity?, comment?}]` —
-  omitted/false `addQuantity` replaces the quantity, `true` adds to it);
+  since release-1.112.1 `silpo_add_cart_products` takes `products`
+  (`[{productId, companyId, branchId, quantity, comment?}]`) for products that
+  are not in the cart yet, `silpo_update_cart_products` takes `products`
+  (`[{id, quantity, comment?}]`) for the ones that are (`id` is the cart
+  line-item id, `quantity` is the new total) and
+  `silpo_remove_cart_products` takes `products` (`[{id}]`);
   `silpo_find_products_batch` takes `products` as a list of strings;
   `silpo_add_or_update_favorite_products` takes `actions`
   (`[{productId, externalProductId, toDelete}]`);
@@ -153,7 +160,8 @@ Key design decisions:
   `certificatesToRemove` as `[{barcode, pincode?}]` objects (plain barcode
   strings are converted client-side). `DeliveryType` covers all 16 live enum
   values. Use `examples/real_smoke.py`
-  to re-dump the live schemas after server updates.
+  to re-dump the live schemas after server updates (`examples/dump_tools.py`
+  writes the raw dump, `examples/diff_mock_live.py` diffs the mock against it).
 - **Response shapes are reconciled too** (verified live, Sep 10 2026, against
   real data for every group; product shapes re-verified Sep 11 2026 for
   release-1.110.1). Every live
@@ -290,6 +298,40 @@ Key design decisions:
     kilograms for weighted products, `get_cart_by_id` afterwards. Client and
     mock docstrings carry it; `examples/real_smoke.py` logs the live tool
     description and probes the other three fixes.
+- **Release-1.112.1 changes (client 0.9.0) — breaking.** Verified live on
+  Oct 20 2026: `tools/list` now returns **42** tools.
+  - **Cart-product tools split.** `silpo_add_or_update_cart_products` is
+    deprecated — the server answers every call with "This tool has been split
+    and is no longer available…". The replacements are
+    `silpo_add_cart_products` (`products: [{productId, companyId, branchId,
+    quantity>0, comment?}]`, for products **not** in the cart yet — adding a
+    product that is already there fails) and `silpo_update_cart_products`
+    (`products: [{id, quantity>0, comment?}]`, for the ones that are).
+    Responses carry the affected lines (`{success, summary, products:[…]}`).
+  - **`silpo_remove_cart_products` changed params (breaking).** It now takes
+    `products: [{id}]` — the **cart line-item id** from
+    `cart.shipments[].products[].id`, not the product id; the old shape is
+    rejected with `-32602` ("expected string, received undefined at
+    products[0].id") and an unknown id is dropped silently.
+  - **Update quantities are absolute** — there is no "add N more" mode; send
+    the new total.
+  - **`silpo_get_product_sets` moved to v2** — `branchId` is the only
+    argument now (`deliveryType` is gone from the live schema); the response
+    is `{success, summary, sets:[{slug, title, description, link}]}`.
+  - **`silpo_find_products_batch` runs on the new search version** — the tool
+    schema and the response envelope are unchanged, but the products now carry
+    the same fields as `get_products` (`id`/`name`/`slug`/`price`/
+    `displayPrice`/`stock`/`available`/`weighted`/`step`/`displayRatio`/
+    `companyId`/`branchId`/`externalProductId`).
+  - Client side: `add_cart_products` / `update_cart_products` /
+    `remove_cart_products(cart_id, line_ids)` /
+    `remove_cart_products_by_product(cart_id, product_id)`; the old
+    `add_or_update_cart_products` stays as a deprecated shim (reads the cart,
+    routes every line to the right tool, emulates `addQuantity`, warns with
+    `DeprecationWarning`). `SilpoCart.lines` (`CartLine`) normalizes the cart
+    lines of both transports, with `line_ids`/`line_for`/`line_by_id`
+    helpers. The mock mirrors the split (and fails the deprecated tool with
+    the same message).
 - **Release-1.111.5 changes (client 0.8.2).**
   - **`silpo_get_coupon_details` gateway coupons:** the live `coupon` object
     gained `successorThreshold` (`{promoId, amount, description, rewardText}`,

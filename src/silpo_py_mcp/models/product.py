@@ -168,10 +168,20 @@ class BatchProductResult(SilpoModel):
 
 
 class ProductSet(SilpoModel):
-    """A curated selection of products (thematic, seasonal)."""
+    """A curated selection of products (thematic, seasonal).
+
+    Since release-1.112.1 the tool runs on the v2 endpoint, which returns the
+    branch's sets as ``{slug, title, description, link}`` — the slug is the
+    identifier, so it is exposed as ``id`` (and as ``slug``).
+    """
 
     id: str = Field(validation_alias=AliasChoices("id", "slug"))
     title: str
     description: str | None = None
     products: list[SilpoProduct] = Field(default_factory=list)
     link: str | None = None
+
+    @property
+    def slug(self) -> str:
+        """The set slug — the value to pass to ``get_products(set=...)``."""
+        return self.id

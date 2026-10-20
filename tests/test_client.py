@@ -11,9 +11,7 @@ from silpo_py_mcp import SilpoClient
 from silpo_py_mcp.models import (
     Address,
     BatchProductResult,
-    CartLineInput,
     CartSummary,
-    CartUpdateResult,
     Category,
     Coupon,
     CreateShoppingCartResult,
@@ -32,7 +30,7 @@ TE = "2026-09-06T11:00:00+03:00"
 
 async def test_list_tools(client: SilpoClient) -> None:
     tools = await client.list_tools()
-    assert len(tools) == 40
+    assert len(tools) == 42
     assert all(tool.name.startswith("silpo_") for tool in tools)
 
 
@@ -159,18 +157,32 @@ async def test_cart_mutation_wire_args(client: SilpoClient) -> None:
     cart_id = cart.resolved_cart_id
     assert cart_id is not None
 
-    await client.add_or_update_cart_products(cart_id, [{"productId": "prd-milk-2pct", "quantity": 2}])
-    await client.remove_cart_products(cart_id, ["prd-milk-2pct"])
+    await client.add_cart_products(
+        cart_id,
+        [{"productId": "prd-milk-2pct", "companyId": "co-1", "branchId": "bran-1", "quantity": 2}],
+    )
+    fetched = await client.get_cart_by_id(cart_id)
+    line = fetched.line_for("prd-milk-2pct")
+    assert line is not None
+    assert line.id
+
+    await client.update_cart_products(cart_id, [{"id": line.id, "quantity": 3}])
+    await client.remove_cart_products(cart_id, [line.id])
     await client.add_or_update_certificates(cart_id, ["cert-1"])
 
     by_name = {name: args for name, args in captured}
-    assert by_name["silpo_add_or_update_cart_products"] == {
+    assert by_name["silpo_add_cart_products"] == {
         "shoppingCartId": cart_id,
-        "products": [{"productId": "prd-milk-2pct", "quantity": 2}],
+        "products": [{"productId": "prd-milk-2pct", "companyId": "co-1", "branchId": "bran-1", "quantity": 2}],
     }
+    assert by_name["silpo_update_cart_products"] == {
+        "shoppingCartId": cart_id,
+        "products": [{"id": line.id, "quantity": 3}],
+    }
+    # release-1.112.1: removal addresses the cart line-item id, not the product id
     assert by_name["silpo_remove_cart_products"] == {
         "shoppingCartId": cart_id,
-        "products": [{"productId": "prd-milk-2pct"}],
+        "products": [{"id": line.id}],
     }
     assert by_name["silpo_add_or_update_certificates"] == {
         "shoppingCartId": cart_id,
@@ -179,8 +191,8 @@ async def test_cart_mutation_wire_args(client: SilpoClient) -> None:
     }
 
 
-async def test_cart_add_quantity_and_comment_wire_args(client: SilpoClient) -> None:
-    """addQuantity/comment from the live schema must pass through verbatim."""
+async def test_update_cart_products_quantity_is_absolute(client: SilpoClient) -> None:
+    """release-1.112.1: the update quantity is the new total, not a delta."""
 
     captured: list[tuple[str, dict[str, Any]]] = []
     real_call_tool = client.call_tool
@@ -195,49 +207,117 @@ async def test_cart_add_quantity_and_comment_wire_args(client: SilpoClient) -> N
     cart_id = cart.resolved_cart_id
     assert cart_id is not None
 
-    await client.add_or_update_cart_products(
+    await client.add_cart_products(
         cart_id,
-        [
-            {
-                "productId": "prd-milk-2pct",
-                "companyId": "co-1",
-                "branchId": "bran-1",
-                "quantity": 1,
-                "addQuantity": False,
-                "comment": "без пакета",
-            }
-        ],
+        [{"productId": "prd-milk-2pct", "companyId": "co-1", "branchId": "bran-1", "quantity": 1}],
     )
-    await client.add_or_update_cart_products(
-        cart_id,
-        [
-            CartLineInput(
-                productId="prd-milk-2pct",
-                companyId="co-1",
-                branchId="bran-1",
-                quantity=2,
-                addQuantity=True,
-            )
-        ],
-    )
+    fetched = await client.get_cart_by_id(cart_id)
+    line = fetched.line_for("prd-milk-2pct")
+    assert line is not None and line.id
+
+    await client.update_cart_products(cart_id, [{"id": line.id, "quantity": 4, "comment": "без пакета"}])
 
     by_name = {name: args for name, args in captured}
-    assert by_name["silpo_add_or_update_cart_products"] == {
+    assert by_name["silpo_update_cart_products"]["products"] == [
+        {"id": line.id, "quantity": 4, "comment": "без пакета"}
+    ]
+
+    refetched = await client.get_cart_by_id(cart_id)
+    updated_line = refetched.line_for("prd-milk-2pct")
+    assert updated_line is not None
+    assert updated_line.quantity == 4
+
+
+async def test_deprecated_add_or_update_cart_products_routes_to_new_tools(client: SilpoClient) -> None:
+    """release-1.112.1: the removed tool is emulated on top of the two new ones."""
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append((str(name), dict(arguments)))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+
+    with pytest.warns(DeprecationWarning):
+        await client.add_or_update_cart_products(
+            cart_id,
+            [{"productId": "prd-milk-2pct", "companyId": "co-1", "branchId": "bran-1", "quantity": 2}],
+        )
+
+    by_name = {name: args for name, args in captured}
+    assert by_name["silpo_add_cart_products"]["products"] == [
+        {"productId": "prd-milk-2pct", "companyId": "co-1", "branchId": "bran-1", "quantity": 2}
+    ]
+    assert "silpo_update_cart_products" not in by_name
+
+    captured.clear()
+    with pytest.warns(DeprecationWarning):
+        await client.add_or_update_cart_products(
+            cart_id,
+            [
+                {
+                    "productId": "prd-milk-2pct",
+                    "companyId": "co-1",
+                    "branchId": "bran-1",
+                    "quantity": 5,
+                    "addQuantity": True,
+                }
+            ],
+        )
+
+    by_name = {name: args for name, args in captured}
+    update = by_name["silpo_update_cart_products"]["products"][0]
+    assert update["quantity"] == 7  # current (2) + 5
+    assert "addQuantity" not in update
+
+
+async def test_remove_cart_products_by_product_resolves_line_id(client: SilpoClient) -> None:
+    """release-1.112.1: removing by product id resolves the cart line-item id."""
+
+    captured: list[tuple[str, dict[str, Any]]] = []
+    real_call_tool = client.call_tool
+
+    async def spy(name: str, arguments: Mapping[str, Any]) -> Any:
+        captured.append((str(name), dict(arguments)))
+        return await real_call_tool(name, arguments)
+
+    client.call_tool = spy  # type: ignore[method-assign]
+
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    await client.add_cart_products(
+        cart_id,
+        [{"productId": "prd-bread", "companyId": "co-2", "branchId": "bran-1", "quantity": 1}],
+    )
+    fetched = await client.get_cart_by_id(cart_id)
+    line = fetched.line_for("prd-bread")
+    assert line is not None and line.id
+
+    await client.remove_cart_products_by_product(cart_id, "prd-bread")
+
+    by_name = {name: args for name, args in captured}
+    assert by_name["silpo_remove_cart_products"] == {
         "shoppingCartId": cart_id,
-        "products": [
-            {
-                "productId": "prd-milk-2pct",
-                "companyId": "co-1",
-                "branchId": "bran-1",
-                "quantity": 2,
-                "addQuantity": True,
-            }
-        ],
+        "products": [{"id": line.id}],
     }
 
-    fetched: SilpoCart = await client.get_cart_by_id(cart_id)
-    line = next(item for item in fetched.items if item.product_id == "prd-milk-2pct")
-    assert line.quantity == 1 + 2
+    refetched = await client.get_cart_by_id(cart_id)
+    assert refetched.line_for("prd-bread") is None
+
+
+async def test_remove_cart_products_by_product_unknown_product(client: SilpoClient) -> None:
+    cart = await client.get_cart()
+    cart_id = cart.resolved_cart_id
+    assert cart_id is not None
+    with pytest.raises(ValueError, match="No cart line holds product"):
+        await client.remove_cart_products_by_product(cart_id, "prd-unknown")
 
 
 async def test_full_cart_workflow(client: SilpoClient) -> None:
@@ -245,7 +325,7 @@ async def test_full_cart_workflow(client: SilpoClient) -> None:
     cart_id = cart.resolved_cart_id
     assert cart_id is not None
 
-    added: CartUpdateResult = await client.add_or_update_cart_products(
+    await client.add_cart_products(
         cart_id,
         [
             {
@@ -257,11 +337,13 @@ async def test_full_cart_workflow(client: SilpoClient) -> None:
             {"productId": "prd-bread", "companyId": "co-2", "branchId": "bran-1", "quantity": 1},
         ],
     )
-    assert added.cart.totals.items_price == 2 * 36.9 + 28.5
 
     fetched: SilpoCart = await client.get_cart_by_id(cart_id)
     assert len(fetched.items) == 2
+    assert fetched.totals.items_price == 2 * 36.9 + 28.5
     assert fetched.checkout_web_link
+    assert len(fetched.lines) == 2
+    assert len(fetched.line_ids) == 2
 
     updated = await client.update_shopping_cart(
         cart_id,
@@ -279,8 +361,12 @@ async def test_full_cart_workflow(client: SilpoClient) -> None:
     assert updated.cart.loyalty.bonus_applied == 25.0
     assert updated.cart.address == {"addressType": "house", "address": "Київ, вул. Центральна"}
 
-    removed = await client.remove_cart_products(cart_id, ["prd-bread"])
-    assert len(removed.cart.items) == 1
+    bread_line = fetched.line_for("prd-bread")
+    assert bread_line is not None and bread_line.id
+    await client.remove_cart_products(cart_id, [bread_line.id])
+    refetched = await client.get_cart_by_id(cart_id)
+    assert len(refetched.items) == 1
+    assert refetched.line_for("prd-bread") is None
 
     cleared = await client.clear_cart(cart_id)
     assert cleared.cart.items == []
@@ -530,7 +616,7 @@ async def test_cart_payment_types_and_delivery_discount(client: SilpoClient) -> 
     cart = await client.get_cart()
     cart_id = cart.resolved_cart_id
     assert cart_id is not None
-    await client.add_or_update_cart_products(
+    await client.add_cart_products(
         cart_id,
         [{"productId": "prd-cheese", "companyId": "co-2", "branchId": "bran-1", "quantity": 1}],
     )
@@ -757,22 +843,27 @@ async def test_time_slot_bookable_flag(client: SilpoClient) -> None:
 
 
 async def test_cart_mutation_result_carries_payment_data(client: SilpoClient) -> None:
-    """A cart echoed back by a mutation is interchangeable with a re-read.
+    """A cart re-read after a mutation is interchangeable with the mutation result.
 
-    The mock returns the whole cart from every write tool; the release-1.111.3
+    Since release-1.112.1 the cart-product tools answer with the affected
+    lines only, so the cart has to be re-read — the release-1.111.3
     payment/delivery fields must be lifted on that path too, not only on
     ``get_cart_by_id``.
     """
     cart = await client.get_cart()
     cart_id = cart.resolved_cart_id
     assert cart_id is not None
-    result = await client.add_or_update_cart_products(
+    result = await client.add_cart_products(
         cart_id,
         [{"productId": "prd-cheese", "companyId": "co-2", "branchId": "bran-1", "quantity": 1}],
     )
-    assert result.cart.payment.types
-    assert "Card" in result.cart.available_payment_types
-    assert result.cart.delivery.total == 0.0
-    assert result.cart.calculation is not None
-    assert result.cart.calculation.total == result.cart.totals.total_price
-    assert result.cart.validations
+    assert result.success is True
+    assert result.products == [{"productId": "prd-cheese", "quantity": 1.0}]
+
+    fetched = await client.get_cart_by_id(cart_id)
+    assert fetched.payment.types
+    assert "Card" in fetched.available_payment_types
+    assert fetched.delivery.total == 0.0
+    assert fetched.calculation is not None
+    assert fetched.calculation.total == fetched.totals.total_price
+    assert fetched.validations

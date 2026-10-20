@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.9.0 — 2026-10-20
+
+Reconciled with server release-1.112.1 (verified live: **42** tools, was 40).
+The release splits the cart-product tools and moves `silpo_get_product_sets` to
+its v2 endpoint — both are breaking for the client.
+
+### Added
+
+- `SilpoClient.add_cart_products(cart_id, products)` — adds products that are
+  **not** in the cart yet (`{productId, companyId, branchId, quantity,
+  comment?}`). The server rejects a product that is already in the cart and
+  points at `update_cart_products`.
+- `SilpoClient.update_cart_products(cart_id, products)` — changes the quantity
+  of a product that **is** in the cart (`{id, quantity, comment?}`). The `id`
+  is the cart line-item id (`cart.shipments[].products[].id`), and the
+  quantity is the **new total** — there is no "add N more" mode.
+- `SilpoClient.remove_cart_products_by_product(cart_id, product_id)` — resolves
+  a product id to the cart line-item id and removes that line.
+- `CartLine` model + `SilpoCart.lines` / `line_ids` / `line_for(product_id)` /
+  `line_by_id(line_id)` — the cart lines of both transports normalized into one
+  shape, so the line-item id the new tools need is always reachable.
+- `CartProductAddInput` / `CartProductUpdateInput` — typed payloads for the
+  two new cart-product tools.
+- `ProductSet.slug` — the live v2 sets identify themselves by slug.
+- `examples/dump_tools.py` (dumps the live `tools/list` to JSON) and
+  `examples/diff_mock_live.py` (diffs the mock's contract against that dump) —
+  the drift detectors used to reconcile this release.
+
+### Changed
+
+- **`SilpoClient.remove_cart_products(cart_id, line_ids)` takes cart line-item
+  ids** (breaking): it sends `products: [{"id": …}]`. The server rejects the
+  old `{"productId": …}` shape with `-32602` and drops unknown ids silently.
+- `SilpoClient.get_product_sets(branch_id)` no longer sends `deliveryType` —
+  the v2 endpoint takes `branchId` only. The `delivery_type` keyword is still
+  accepted but ignored (with a `DeprecationWarning`).
+- `SilpoClient.find_products_batch` documents the new search version: the
+  results now carry the same fields as `get_products`, so `product_id` /
+  `company_id` / `branch_id` feed straight into `add_cart_products`.
+- `SilpoClient.add_or_update_cart_products` is deprecated: it now warns with a
+  `DeprecationWarning` and is implemented on top of the two new tools (it
+  reads the cart, routes each line to add or update and emulates the old
+  `addQuantity` semantics). The server itself now rejects the tool.
+- The mock mirrors the split: `silpo_add_cart_products` /
+  `silpo_update_cart_products` are implemented, `silpo_remove_cart_products`
+  requires the line-item id, the deprecated tool fails with the server's own
+  message, the cart lines carry ids and are mirrored into
+  `shipments[].products[]`, and `silpo_get_product_sets` follows the v2
+  endpoint (`branchId` only, `{success, summary, sets}` envelope).
+
+### Deprecated
+
+- `SilpoClient.add_or_update_cart_products` — use `add_cart_products` /
+  `update_cart_products`.
+- `SilpoClient.get_product_sets(..., delivery_type=...)` — the argument is
+  ignored since the v2 endpoint.
+
+### Fixed
+
+- A server-side "Resource not found" (e.g. `silpo_get_promotions` for an
+  unknown branch) is no longer reported as `SilpoToolNotFoundError` (a missing
+  tool) — it is a `SilpoToolExecutionError` now. Only a genuine "method not
+  found"/`-32601` maps to `SilpoToolNotFoundError`.
+
 ## 0.8.2 — 2026-09-30
 
 Reconciled with server release-1.111.5 (1 tool affected, still 40 tools, no

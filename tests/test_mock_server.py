@@ -13,11 +13,11 @@ from silpo_py_mcp.tools import SilpoTool
 EXPECTED_TOOLS: list[str] = [t.value for t in SilpoTool]
 
 
-async def test_mock_exposes_all_40_documented_tools(mock_server: SilpoMockServer) -> None:
+async def test_mock_exposes_all_documented_tools(mock_server: SilpoMockServer) -> None:
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
         names = sorted(tool.name for tool in await client.list_tools())
-    assert len(names) == 40
+    assert len(names) == 42
     assert names == sorted(EXPECTED_TOOLS)
 
 
@@ -73,53 +73,118 @@ async def test_mock_cart_lifecycle(mock_server: SilpoMockServer) -> None:
         cart_id = summary.data["cartId"]
 
         add = await client.call_tool(
-            "silpo_add_or_update_cart_products",
+            "silpo_add_cart_products",
             {
                 "shoppingCartId": cart_id,
                 "products": [{"productId": "prd-milk-2pct", "quantity": 2}],
             },
         )
-        assert add.data["cart"]["totals"]["totalPrice"] == 2 * 36.9
+        assert add.data["summary"] == "Added 1 product(s)"
+        assert add.data["products"] == [{"productId": "prd-milk-2pct", "quantity": 2.0}]
+
+        cart = await client.call_tool("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id})
+        assert cart.data["totals"]["totalPrice"] == 2 * 36.9
+        # release-1.112.1: the lines live under shipments[].products[] with a line-item id
+        line = cart.data["shipments"][0]["products"][0]
+        assert line["id"]
+        assert line["productId"] == "prd-milk-2pct"
 
         remove = await client.call_tool(
-            "silpo_remove_cart_products", {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct"}]}
+            "silpo_remove_cart_products", {"shoppingCartId": cart_id, "products": [{"id": line["id"]}]}
         )
-        assert remove.data["cart"]["items"] == []
+        assert remove.data["summary"] == "Removed 1 product(s)"
+
+        cleared = await client.call_tool("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id})
+        assert cleared.data["items"] == []
 
         clear = await client.call_tool("silpo_clear_shopping_cart", {"shoppingCartId": cart_id})
         assert clear.data["cart"]["totals"]["totalPrice"] == 0.0
 
 
-async def test_mock_cart_add_quantity_replace_vs_add(mock_server: SilpoMockServer) -> None:
+async def test_mock_deprecated_add_or_update_cart_products_is_rejected(mock_server: SilpoMockServer) -> None:
+    """release-1.112.1: the split tool still exists but always fails."""
     client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
     async with client:
         summary = await client.call_tool("silpo_get_my_shopping_cart", {})
         cart_id = summary.data["cartId"]
+        with pytest.raises(ToolError, match="has been split"):
+            await client.call_tool(
+                "silpo_add_or_update_cart_products",
+                {
+                    "shoppingCartId": cart_id,
+                    "products": [{"productId": "prd-milk-2pct", "quantity": 1}],
+                },
+            )
 
+
+async def test_mock_remove_cart_products_requires_line_id(mock_server: SilpoMockServer) -> None:
+    """release-1.112.1: the product id is no longer accepted."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        summary = await client.call_tool("silpo_get_my_shopping_cart", {})
+        cart_id = summary.data["cartId"]
         await client.call_tool(
-            "silpo_add_or_update_cart_products",
-            {
-                "shoppingCartId": cart_id,
-                "products": [{"productId": "prd-milk-2pct", "quantity": 1}],
-            },
+            "silpo_add_cart_products",
+            {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct", "quantity": 1}]},
         )
-        replaced = await client.call_tool(
-            "silpo_add_or_update_cart_products",
-            {
-                "shoppingCartId": cart_id,
-                "products": [{"productId": "prd-milk-2pct", "quantity": 2}],
-            },
-        )
-        assert replaced.data["cart"]["items"][0]["quantity"] == 2
+        with pytest.raises(ToolError, match=r"products\[0\]\.id is required"):
+            await client.call_tool(
+                "silpo_remove_cart_products",
+                {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct"}]},
+            )
 
-        added = await client.call_tool(
-            "silpo_add_or_update_cart_products",
-            {
-                "shoppingCartId": cart_id,
-                "products": [{"productId": "prd-milk-2pct", "quantity": 2, "addQuantity": True}],
-            },
+
+async def test_mock_update_cart_products_quantity_is_absolute(mock_server: SilpoMockServer) -> None:
+    """release-1.112.1: the update quantity replaces the current one."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        summary = await client.call_tool("silpo_get_my_shopping_cart", {})
+        cart_id = summary.data["cartId"]
+        await client.call_tool(
+            "silpo_add_cart_products",
+            {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct", "quantity": 1}]},
         )
-        assert added.data["cart"]["items"][0]["quantity"] == 4
+        cart = await client.call_tool("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id})
+        line_id = cart.data["shipments"][0]["products"][0]["id"]
+
+        updated = await client.call_tool(
+            "silpo_update_cart_products",
+            {"shoppingCartId": cart_id, "products": [{"id": line_id, "quantity": 4}]},
+        )
+        assert updated.data["products"] == [{"id": line_id, "quantity": 4.0}]
+
+        refetched = await client.call_tool("silpo_get_shopping_cart_by_id", {"shoppingCartId": cart_id})
+        assert refetched.data["shipments"][0]["products"][0]["quantity"] == 4
+
+
+async def test_mock_add_cart_products_rejects_duplicate(mock_server: SilpoMockServer) -> None:
+    """release-1.112.1: adding a product that is already in the cart fails."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        summary = await client.call_tool("silpo_get_my_shopping_cart", {})
+        cart_id = summary.data["cartId"]
+        await client.call_tool(
+            "silpo_add_cart_products",
+            {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct", "quantity": 1}]},
+        )
+        with pytest.raises(ToolError, match="already in the cart"):
+            await client.call_tool(
+                "silpo_add_cart_products",
+                {"shoppingCartId": cart_id, "products": [{"productId": "prd-milk-2pct", "quantity": 1}]},
+            )
+
+
+async def test_mock_product_sets_v2_has_no_delivery_type(mock_server: SilpoMockServer) -> None:
+    """release-1.112.1: the v2 endpoint takes branchId only."""
+    client = Client(mock_server.fastmcp)  # type: ignore[attr-defined]
+    async with client:
+        result = await client.call_tool("silpo_get_product_sets", {"branchId": "bran-1"})
+        assert result.data["summary"] == "Found 1 product sets"
+        assert result.data["sets"][0]["slug"] == "snidanok-150"
+
+        schema = next(t for t in await client.list_tools() if t.name == "silpo_get_product_sets")
+        assert set(schema.inputSchema["properties"]) == {"branchId"}
+        assert schema.inputSchema["required"] == ["branchId"]
 
 
 async def test_mock_time_slots_match_live_output_shape(mock_server: SilpoMockServer) -> None:
@@ -284,7 +349,7 @@ async def test_mock_apply_bonuses(mock_server: SilpoMockServer) -> None:
         summary = await client.call_tool("silpo_get_my_shopping_cart", {})
         cart_id = summary.data["cartId"]
         await client.call_tool(
-            "silpo_add_or_update_cart_products",
+            "silpo_add_cart_products",
             {
                 "shoppingCartId": cart_id,
                 "products": [{"productId": "prd-cheese", "quantity": 1}],
